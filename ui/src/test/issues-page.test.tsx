@@ -47,7 +47,7 @@ it("groups issues by status and creates issues for an organization", async () =>
   renderApp("/orgs/org-1/issues");
   const pageHeader = screen.getByRole("heading", { name: "全部任务" }).closest("header")!;
   expect(within(pageHeader).getByText("Issues")).toHaveClass("eyebrow");
-  expect(within(pageHeader).getByText("查看组织内全部任务，按状态跟进执行进度与负责人。")).toHaveClass("muted");
+  expect(within(pageHeader).getByText("查看组织内全部任务，按状态跟进执行进度与负责人。")).toHaveClass("tertiary-page-supporting");
   expect(await screen.findByRole("link", { name: "实现登录流程" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-1",

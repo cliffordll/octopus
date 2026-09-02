@@ -27,7 +27,7 @@ it("manages organization resources from the organization navigation", async () =
   const resourceHeader = resourceHeading.closest("header")!;
   expect(resourceHeader).toHaveClass("page-header");
   expect(resourceHeader).not.toHaveClass("org-resource-hero");
-  expect(resourceHeader.parentElement).toHaveClass("org-content-full");
+  expect(resourceHeader.closest(".org-content")).toHaveClass("org-content-full");
   expect(within(resourceHeader).getByText("Resources")).toHaveClass("eyebrow");
   expect(within(resourceHeader).getByRole("button", { name: "添加资源" })).toBeInTheDocument();
   expect(within(resourceHeader).getByRole("link", { name: "浏览工作区" })).toHaveAttribute("href", "/orgs/org-1/workspaces");
@@ -225,9 +225,9 @@ it("shows organization skills and edits the selected skill file", async () => {
   renderApp("/orgs/org-1/skills");
   const skillsHeader = (await screen.findByRole("heading", { name: "技能", level: 1 })).closest("header")!;
   expect(skillsHeader).toHaveClass("page-header");
-  expect(skillsHeader.parentElement).toHaveClass("org-content-full", "organization-skills-content");
+  expect(skillsHeader.closest(".org-content")).toHaveClass("org-content-full", "organization-skills-content");
   expect(within(skillsHeader).getByText("Skills")).toHaveClass("eyebrow");
-  expect(await within(skillsHeader).findByText("3 个可用")).toHaveClass("muted");
+  expect(await within(skillsHeader).findByText("3 个可用")).toHaveClass("tertiary-page-supporting");
   expect(within(skillsHeader).queryByRole("button")).not.toBeInTheDocument();
   const skillManagement = screen.getByRole("group", { name: "技能管理" });
   expect(within(skillManagement).getByRole("button", { name: "导入" })).toBeInTheDocument();

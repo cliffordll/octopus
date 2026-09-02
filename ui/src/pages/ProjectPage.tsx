@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { organizationsApi } from "../api/organizations";
@@ -865,30 +865,18 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
   return (
     <OrgWorkspace contentClassName={`org-content-full tertiary-page-content${activeTab === "workspace" ? " project-workspace-content" : ""}`} orgId={orgId}>
       <TertiaryPageShell className="project-detail-shell">
-      <TertiaryPageHeader className="project-detail-header">
-        <div className="tertiary-page-identity project-header-identity">
-          <span className="project-avatar-lg" style={{ background: project.data?.color ?? "#6366f1" }}>
-            {(project.data?.name ?? "P").slice(0, 1).toUpperCase()}
-          </span>
-          <div className="project-detail-title">
-            <div className="project-heading-row">
-              <h1>{project.data?.name ?? "载入中..."}</h1>
-            </div>
-            {project.data && (
-              <div className="project-header-meta">
-                <Badge>{project.data.urlKey}</Badge>
-              </div>
-            )}
-            {project.data?.description && <p className="muted">{project.data.description}</p>}
-          </div>
-        </div>
-        {project.data && (
-          <div className="tertiary-page-actions project-header-actions">
-            <Link className="button secondary" to={`/orgs/${orgId}/chats`}>聊天</Link>
-            <button className="danger" disabled={removeProject.isPending} onClick={() => removeProject.mutate()} type="button">删除项目</button>
-          </div>
-        )}
-      </TertiaryPageHeader>
+      <TertiaryPageHeader
+        actions={project.data ? <>
+          <Link className="button secondary" to={`/orgs/${orgId}/chats`}>聊天</Link>
+          <button className="danger" disabled={removeProject.isPending} onClick={() => removeProject.mutate()} type="button">删除项目</button>
+        </> : undefined}
+        eyebrow="Project"
+        supporting={project.data ? <div className="project-header-meta">
+              <Badge>{project.data.urlKey}</Badge>
+              {project.data.description && <span>{project.data.description}</span>}
+        </div> : undefined}
+        title={project.data?.name ?? "载入中..."}
+      />
       {project.data && (
         <>
           {project.data.pauseReason === "budget" && (
@@ -898,11 +886,11 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
             </div>
           )}
           <nav aria-label="项目详情导航" className="detail-tabs">
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/workspace`}>工作区</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/budget`}>预算</NavLink>
+            <Link aria-current={activeTab === "configuration" ? "page" : undefined} className={activeTab === "configuration" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</Link>
+            <Link aria-current={activeTab === "workspace" ? "page" : undefined} className={activeTab === "workspace" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/workspace`}>工作区</Link>
+            <Link aria-current={activeTab === "resources" ? "page" : undefined} className={activeTab === "resources" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</Link>
+            <Link aria-current={activeTab === "issues" ? "page" : undefined} className={activeTab === "issues" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</Link>
+            <Link aria-current={activeTab === "budget" ? "page" : undefined} className={activeTab === "budget" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/budget`}>预算</Link>
           </nav>
           <TertiaryPageViewport
             className={activeTab === "workspace" ? "tertiary-page-viewport-contained" : undefined}

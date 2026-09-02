@@ -9,6 +9,7 @@ import { roleLabel, statusLabel } from "../utils/display";
 import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
 import { SidebarIcon } from "./SidebarIcon";
+import { TertiaryPageFrame } from "./TertiaryPageShell";
 
 function ContextWorkspace({
   contentClassName = "",
@@ -25,6 +26,7 @@ function ContextWorkspace({
   sidebar: ReactNode;
 }>) {
   const isFullBleed = contentClassName.split(" ").includes("org-content-full");
+  const isContained = contentClassName.split(" ").includes("tertiary-page-contained");
   return (
     <div className="org-workspace context-workspace">
       <aside className="org-sidebar context-sidebar">
@@ -34,8 +36,10 @@ function ContextWorkspace({
           {sidebar}
         </nav>
       </aside>
-      <div className={`org-content ${contentClassName}`}>
-        {isFullBleed ? children : <div className="tertiary-detail-frame">{children}</div>}
+      <div className={`org-content ${contentClassName}${isFullBleed ? " tertiary-page-content" : ""}`}>
+        {isFullBleed
+          ? <TertiaryPageFrame contained={isContained}>{children}</TertiaryPageFrame>
+          : <div className="tertiary-detail-frame">{children}</div>}
       </div>
     </div>
   );

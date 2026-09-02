@@ -78,13 +78,7 @@ export function ProjectsPage() {
       {projects.isSuccess && projects.data.length > 0 && !shouldOpenCreate && (
         <Navigate replace to={`/orgs/${orgId}/projects/${projects.data[0]!.id}`} />
       )}
-      <TertiaryPageHeader>
-        <div>
-          <p className="eyebrow">Projects</p>
-          <h1>项目</h1>
-          <p className="muted">当前组织下的项目。</p>
-        </div>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader eyebrow="Projects" supporting="当前组织下的项目。" title="项目" />
       {projects.error && <ErrorNotice error={projects.error} />}
       {projects.isSuccess && projects.data.length === 0 && (
         <section className="panel project-empty-state">

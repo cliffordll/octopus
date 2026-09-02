@@ -44,14 +44,12 @@ export function RunIntelligencePage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader>
-        <div>
-          <p className="eyebrow">Run Intelligence</p>
-          <h1>运行分析</h1>
-          <p className="muted">按运行标识检索执行详情、事件与日志。</p>
-        </div>
-        <Link className="button secondary small-button" to={`/orgs/${orgId}/heartbeat-runs`}>返回运行记录</Link>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader
+        actions={<Link className="button secondary small-button" to={`/orgs/${orgId}/heartbeat-runs`}>返回运行记录</Link>}
+        eyebrow="Run Intelligence"
+        supporting="按运行标识检索执行详情、事件与日志。"
+        title="运行分析"
+      />
       <section className="panel">
         <label>
           Run ID 前缀

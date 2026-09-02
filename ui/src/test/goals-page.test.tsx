@@ -79,7 +79,9 @@ it("lists goals and creates a goal from a dialog", async () => {
   const goalsHeader = (await screen.findByRole("heading", { name: "目标", level: 1 })).closest("header")!;
   expect(goalsHeader).toHaveClass("page-header");
   expect(goalsHeader).not.toHaveClass("org-resource-hero");
-  expect(goalsHeader.parentElement).toHaveClass("org-content-full");
+  expect(goalsHeader.closest(".org-content")).toHaveClass("org-content-full", "tertiary-page-content");
+  expect(goalsHeader.parentElement).toHaveClass("tertiary-page-shell");
+  expect(goalsHeader.nextElementSibling).toHaveClass("tertiary-page-viewport");
   expect(within(goalsHeader).getByText("Goals")).toHaveClass("eyebrow");
   expect(within(goalsHeader).getByRole("button", { name: "创建目标" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "目标列表", level: 2 }).parentElement?.parentElement).toHaveClass("org-section-header");

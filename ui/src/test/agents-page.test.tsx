@@ -90,11 +90,7 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(agentEntry.querySelector(".context-entry-icon")?.textContent).toBe("");
   expect(agentEntry).toHaveTextContent("工程");
   expect(agentEntry).toHaveClass("active");
-  const agentAvatar = screen.getByRole("heading", { name: "Builder" }).closest("header")!.querySelector(".agent-avatar-lg")!;
-  expect(agentAvatar).toHaveAttribute("aria-hidden", "true");
-  expect(agentAvatar.textContent).toBe("");
-  expect(agentAvatar.querySelector("svg")).toHaveClass("sidebar-nav-icon");
-  expect(agentAvatar.querySelector("svg")?.innerHTML).toBe(agentEntry.querySelector("svg")?.innerHTML);
+  expect(screen.getByRole("heading", { name: "Builder" }).closest("header")!.querySelector(".agent-avatar-lg")).toBeNull();
   expect(screen.queryByRole("link", { name: "返回智能体列表" })).not.toBeInTheDocument();
   const organizationTrigger = screen.getByRole("button", { name: "组织菜单" });
   expect(organizationTrigger).toHaveAttribute("title", "核心团队 · 切换组织");

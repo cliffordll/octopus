@@ -295,9 +295,11 @@ it("shows organization cost reporting on the organization costs route", async ()
   const costHeading = await screen.findByRole("heading", { name: "成本", level: 1 });
   const costHeader = costHeading.closest("header")!;
   expect(costHeader).toHaveClass("page-header");
-  expect(costHeader.parentElement).toHaveClass("org-content-full", "organization-fullscreen-detail", "organization-costs-content");
+  expect(costHeader.closest(".org-content")).toHaveClass("org-content-full", "organization-fullscreen-detail", "organization-costs-content");
+  expect(costHeader.nextElementSibling).toHaveClass("tertiary-page-viewport", "tertiary-page-viewport-contained");
+  expect(within(screen.getByRole("navigation", { name: "主导航" })).getByRole("link", { name: "组织" })).toHaveClass("active");
   expect(within(costHeader).getByText("Organization Costs")).toHaveClass("eyebrow");
-  expect(within(costHeader).getByText("按智能体、服务商、计费方和项目查看运行成本。")).toHaveClass("muted");
+  expect(within(costHeader).getByText("按智能体、服务商、计费方和项目查看运行成本。")).toHaveClass("tertiary-page-supporting");
   expect(screen.getAllByRole("heading", { name: "成本" })).toHaveLength(1);
   expect((await screen.findAllByText("$42.34")).length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText("agent-1")).toBeInTheDocument();

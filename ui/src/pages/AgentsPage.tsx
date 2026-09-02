@@ -20,9 +20,7 @@ export function AgentsPage() {
 
   return (
     <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader className="agents-list-header">
-        <div><p className="eyebrow">Agents</p><h1>智能体</h1></div>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader eyebrow="Agents" title="智能体" />
       <nav aria-label="智能体详情导航" className="detail-tabs">
         <button className={activeTab === "configuration" ? "active" : ""} onClick={() => setActiveTab("configuration")} type="button">配置</button>
         <button className={activeTab === "runs" ? "active" : ""} onClick={() => setActiveTab("runs")} type="button">运行</button>

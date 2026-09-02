@@ -1005,9 +1005,15 @@ it("shows an issue and records comments and review decisions", async () => {
 
   expect(await screen.findByRole("heading", { name: longIssueTitle })).toBeInTheDocument();
 
-  expect(screen.getAllByRole("button", { name: "复制 ID" })).toHaveLength(1);
+  const detailHeader = screen.getByRole("heading", { name: longIssueTitle }).closest("header")!;
+  expect(detailHeader.parentElement).toHaveClass("tertiary-page-shell");
+  expect(document.querySelector(".issue-detail-main")?.closest(".issue-detail-viewport")).toBeInTheDocument();
 
-  expect(screen.getAllByRole("link", { name: "聊天" })).toHaveLength(1);
+  await userEvent.click(screen.getByText("更多"));
+
+  expect(screen.getByRole("menuitem", { name: "复制 ID" })).toBeInTheDocument();
+
+  expect(screen.getByRole("menuitem", { name: "聊天" })).toHaveAttribute("href", "/orgs/org-1/chats");
 
   const properties = screen.getByRole("region", { name: "任务属性" });
 

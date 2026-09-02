@@ -66,7 +66,7 @@ import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 import { StatusPill } from "../components/StatusPill";
-import { TertiaryPageHeader } from "../components/TertiaryPageShell";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
 
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
 
@@ -1685,10 +1685,8 @@ function issueStatusOptionDisabledReason(issue: IssueDetail, status: IssueStatus
 
 function IssueIdStrip({ issue }: { issue: IssueDetail }) {
   const items = [
-    { label: "任务 ID", value: issue.id },
     { label: "任务阶段", value: statusLabel(issue.status) },
     { label: "优先级", value: priorityLabel(issue.priority) },
-    ...(issue.originId ? [{ label: issue.originKind === "manual" ? "来源 ID" : "来源运行 ID", value: issue.originId }] : []),
   ];
 
   return (
@@ -1698,6 +1696,23 @@ function IssueIdStrip({ issue }: { issue: IssueDetail }) {
           <dt>{item.label}</dt>
           <dd title={item.value}>{item.value}</dd>
         </div>))}
+    </dl>
+  );
+}
+
+function IssueTechnicalMeta({ issue }: { issue: IssueDetail }) {
+  return (
+    <dl aria-label="任务技术信息" className="issue-technical-meta">
+      <div>
+        <dt>任务 ID</dt>
+        <dd title={issue.id}>{issue.id}</dd>
+      </div>
+      {issue.originId && (
+        <div>
+          <dt>{issue.originKind === "manual" ? "来源 ID" : "来源运行 ID"}</dt>
+          <dd title={issue.originId}>{issue.originId}</dd>
+        </div>
+      )}
     </dl>
   );
 }
@@ -4802,7 +4817,9 @@ export function IssuePage() {
 
   return (
 
-    <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
+    <IssuesWorkspace contentClassName="org-content-full tertiary-page-content issue-detail-content" orgId={orgId}>
+
+      <TertiaryPageShell>
 
       {agents.error && <ErrorNotice error={agents.error} />}
 
@@ -4816,115 +4833,82 @@ export function IssuePage() {
 
       {issue.data && (
 
-        <div className="issue-detail-layout">
+        <>
 
-          <TertiaryPageHeader className="issue-detail-top">
-
-            <nav aria-label="任务导航" className="issue-breadcrumb">
-
-              <Link to={`/orgs/${orgId}/issues`}>任务编号</Link>
-              <span>/</span>
-
-              <span>{issueDisplayId(issue.data)}</span>
-
-            </nav>
-
-            <div className="issue-detail-title-block">
-
-              <div className="issue-detail-kicker">
-                <IssueIdStrip issue={issue.data} />
-                {latestRun && (
-                  <StatusPill status={latestRun.status}>
-                    {latestRunBadgeLabel(latestRun)}结果：{latestRunStatusText(latestRun)}
-                  </StatusPill>
-                )}
-              </div>
-
-              <div className="issue-title-row">
-
-                <h1>{issue.data.title}</h1>
-
-                <div className="issue-header-actions">
-
-                  {!isAssignedHuman && <button
-
-                    aria-disabled={executeBlockReason ? "true" : undefined}
-
-                    className={executeBlockReason ? "is-disabled" : undefined}
-
-                    disabled={executeIssue.isPending}
-
-                    title={executeBlockReason || (latestRunCanReexecute ? "重新交给负责人启动一次运行" : "交给负责人启动一次运行")}
-
-                    type="button"
-
-                    onClick={executeCurrentIssue}
-
-                  >
-
-                    {executeButtonLabel}
-
-                  </button>}
-
-                  {!isAssignedHuman && <button
-
-                    className="secondary small-button"
-
-                    disabled={checkoutIssue.isPending || !issue.data.assigneeAgentId}
-
-                    title={issue.data.assigneeAgentId ? "由当前负责人签出任务" : "请先分配负责人"}
-
-                    type="button"
-
-                    onClick={() => checkoutIssue.mutate()}
-
-                  >
-
-                    签出任务
-
-                  </button>}
-
-                  {isAssignedHuman && isCurrentHumanAssignee && issue.data.status !== "done" && issue.data.status !== "cancelled" && (
-                    <button
-                      disabled={updateIssue.isPending || issue.data.status === "in_review"}
-                      title={issue.data.status === "in_review" ? "任务正在等待评审" : undefined}
-                      type="button"
-                      onClick={() => updateIssue.mutate({
-                        status: issue.data.status === "in_progress" ? "done" : "in_progress",
-                      })}
-                    >
-                      {issue.data.status === "in_progress" ? "提交完成" : "开始处理"}
-                    </button>
-                  )}
-
-                  {isAssignedHuman && isCurrentHumanAssignee && ["todo", "in_progress"].includes(issue.data.status) && (
-                    <button
-                      className="secondary small-button"
-                      disabled={updateIssue.isPending}
-                      type="button"
-                      onClick={() => updateIssue.mutate({ status: "blocked" })}
-                    >
-                      标记阻塞
-                    </button>
-                  )}
-
-                  {isAssignedHuman && !isCurrentHumanAssignee && (
-                    <Badge>等待 Human 负责人处理</Badge>
-                  )}
-
-                  <button className="secondary small-button" type="button" onClick={() => navigator.clipboard?.writeText(issueDisplayId(issue.data))}>
-
+          <TertiaryPageHeader
+            actions={<>
+              {!isAssignedHuman && <button
+                aria-disabled={executeBlockReason ? "true" : undefined}
+                className={executeBlockReason ? "is-disabled" : undefined}
+                disabled={executeIssue.isPending}
+                title={executeBlockReason || (latestRunCanReexecute ? "重新交给负责人启动一次运行" : "交给负责人启动一次运行")}
+                type="button"
+                onClick={executeCurrentIssue}
+              >
+                {executeButtonLabel}
+              </button>}
+              {!isAssignedHuman && <button
+                className="secondary small-button"
+                disabled={checkoutIssue.isPending || !issue.data.assigneeAgentId}
+                title={issue.data.assigneeAgentId ? "由当前负责人签出任务" : "请先分配负责人"}
+                type="button"
+                onClick={() => checkoutIssue.mutate()}
+              >
+                签出任务
+              </button>}
+              {isAssignedHuman && isCurrentHumanAssignee && issue.data.status !== "done" && issue.data.status !== "cancelled" && (
+                <button
+                  disabled={updateIssue.isPending || issue.data.status === "in_review"}
+                  title={issue.data.status === "in_review" ? "任务正在等待评审" : undefined}
+                  type="button"
+                  onClick={() => updateIssue.mutate({
+                    status: issue.data.status === "in_progress" ? "done" : "in_progress",
+                  })}
+                >
+                  {issue.data.status === "in_progress" ? "提交完成" : "开始处理"}
+                </button>
+              )}
+              {isAssignedHuman && isCurrentHumanAssignee && ["todo", "in_progress"].includes(issue.data.status) && (
+                <button
+                  className="secondary small-button"
+                  disabled={updateIssue.isPending}
+                  type="button"
+                  onClick={() => updateIssue.mutate({ status: "blocked" })}
+                >
+                  标记阻塞
+                </button>
+              )}
+              {isAssignedHuman && !isCurrentHumanAssignee && <Badge>等待 Human 负责人处理</Badge>}
+              <details className="issue-header-more">
+                <summary className="button secondary small-button">更多</summary>
+                <div className="issue-header-more-menu" role="menu">
+                  <button role="menuitem" type="button" onClick={() => navigator.clipboard?.writeText(issueDisplayId(issue.data))}>
                     复制 ID
-
                   </button>
-
-                  <Link className="button secondary small-button" to={`/orgs/${orgId}/chats`}>聊天</Link>
-
+                  <Link className="button" role="menuitem" to={`/orgs/${orgId}/chats`}>聊天</Link>
                 </div>
+              </details>
+            </>}
+            eyebrow={<><Link to={`/orgs/${orgId}/issues`}>Issues</Link><span>/</span><span>{issueDisplayId(issue.data)}</span></>}
+            supporting={<div className="issue-detail-kicker">
+              <IssueIdStrip issue={issue.data} />
+              {latestRun && (
+                <StatusPill status={latestRun.status}>
+                  {latestRunBadgeLabel(latestRun)}结果：{latestRunStatusText(latestRun)}
+                </StatusPill>
+              )}
+            </div>}
+            title={issue.data.title}
+            variant="contained"
+          />
 
-              </div>
+          <TertiaryPageViewport className="issue-detail-viewport">
 
-            </div>
+            <div className="issue-detail-layout">
+
+          <div className="issue-detail-context">
+
+            <IssueTechnicalMeta issue={issue.data} />
 
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
 
@@ -4983,7 +4967,7 @@ export function IssuePage() {
 
             {passiveFollowup.error && <ErrorNotice error={passiveFollowup.error} />}
 
-          </TertiaryPageHeader>
+          </div>
 
           <main className="issue-detail-main">
 
@@ -5671,25 +5655,24 @@ export function IssuePage() {
 
           </aside>
 
-        </div>
+            </div>
+
+          </TertiaryPageViewport>
+
+        </>
 
       )}
 
       {!issue.data && (
 
-        <TertiaryPageHeader>
-
-          <div>
-
-            <Link className="back-link" to={`/orgs/${orgId}/issues`}>返回任务</Link>
-
-            <h1>载入中...</h1>
-
-          </div>
-
-        </TertiaryPageHeader>
+        <TertiaryPageHeader
+          eyebrow={<><Link to={`/orgs/${orgId}/issues`}>Issues</Link><span> / Issue</span></>}
+          title="载入中..."
+        />
 
       )}
+
+      </TertiaryPageShell>
 
     </IssuesWorkspace>
 

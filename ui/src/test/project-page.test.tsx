@@ -202,9 +202,17 @@ it("updates a project and manages its resource attachments", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   const { container } = renderApp("/orgs/org-1/projects/project-1");
-  expect(await screen.findByRole("heading", { name: "控制台" })).toBeInTheDocument();
+  const projectHeading = await screen.findByRole("heading", { name: "控制台" });
+  const projectHeader = projectHeading.closest("header");
+  expect(projectHeader).not.toBeNull();
+  expect(within(projectHeader!).getByText("Project")).toHaveClass("eyebrow");
+  expect(within(projectHeader!).getByText("console")).toBeInTheDocument();
+  expect(within(projectHeader!).getByText("原描述")).toBeInTheDocument();
+  expect(projectHeader!.querySelector(".project-avatar-lg")).toBeNull();
   expect(container.querySelector(".project-summary-grid")).toBeNull();
   const tabs = screen.getByRole("navigation", { name: "项目详情导航" });
+  expect(within(tabs).getByRole("link", { name: "配置" })).toHaveClass("active");
+  expect(within(tabs).getByRole("link", { name: "配置" })).toHaveAttribute("aria-current", "page");
   expect(within(tabs).getByRole("link", { name: "配置" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects/project-1/configuration",

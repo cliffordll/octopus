@@ -10,11 +10,34 @@ import { SidebarAccountMenu } from "./SidebarAccountMenu";
 import { SidebarNavItem } from "./SidebarNavItem";
 import { SidebarIcon } from "./SidebarIcon";
 
+const ORGANIZATION_AREA_SECTIONS = new Set([
+  "structure",
+  "members",
+  "projects",
+  "heartbeat-runs",
+  "run-intelligence",
+  "costs",
+  "resources",
+  "workspaces",
+  "goals",
+  "skills",
+  "settings",
+]);
+const MESSAGE_AREA_SECTIONS = new Set(["chats", "messenger", "approvals"]);
+const ORGANIZATION_SCOPED_SECTIONS = new Set([
+  ...ORGANIZATION_AREA_SECTIONS,
+  ...MESSAGE_AREA_SECTIONS,
+  "issues",
+  "agents",
+]);
+
+function currentOrganizationSection(pathname: string) {
+  return pathname.match(/^\/orgs\/[^/]+\/([^/]+)/)?.[1];
+}
+
 function organizationTarget(pathname: string, orgId: string) {
-  const section = pathname.match(
-    /^\/orgs\/[^/]+\/(chats|messenger|issues|agents|projects|approvals|structure|members|heartbeat-runs|run-intelligence|settings)/,
-  )?.[1];
-  return `/orgs/${orgId}/${section ?? "issues"}`;
+  const section = currentOrganizationSection(pathname);
+  return `/orgs/${orgId}/${section && ORGANIZATION_SCOPED_SECTIONS.has(section) ? section : "issues"}`;
 }
 
 export function AppShell() {
@@ -29,8 +52,9 @@ export function AppShell() {
   const productMenuRef = useRef<HTMLDivElement>(null);
   const quickCreateRef = useRef<HTMLDivElement>(null);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
-  const isMessagesArea = /^\/orgs\/[^/]+\/(chats|messenger|approvals)/.test(location.pathname);
-  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|members|projects|heartbeat-runs|run-intelligence|resources|workspaces|goals|skills|settings)/.test(location.pathname);
+  const activeSection = currentOrganizationSection(location.pathname) ?? "";
+  const isMessagesArea = MESSAGE_AREA_SECTIONS.has(activeSection);
+  const isOrganizationArea = ORGANIZATION_AREA_SECTIONS.has(activeSection);
   const activeOrganizationId = location.pathname.match(/^\/orgs\/([^/]+)/)?.[1];
   const organizations = useQuery({
     queryKey: ["organizations"],

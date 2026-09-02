@@ -198,7 +198,8 @@ it("shows organization members on a dedicated organization page", async () => {
 
   expect(await screen.findByRole("heading", { name: "组织成员" })).toBeInTheDocument();
   const membersRegion = screen.getByRole("region", { name: "组织成员" });
-  expect(membersRegion.parentElement).toHaveClass("org-content-full", "organization-members-content");
+  expect(membersRegion.closest(".org-content")).toHaveClass("org-content-full", "organization-members-content");
+  expect(within(screen.getByRole("navigation", { name: "主导航" })).getByRole("link", { name: "组织" })).toHaveClass("active");
   expect(membersRegion.querySelector("header")).toContainElement(screen.getByRole("button", { name: "创建邀请" }));
   expect(await screen.findByText("Owner")).toBeInTheDocument();
   const organizationNavigation = within(screen.getByRole("navigation", { name: "组织导航" }));

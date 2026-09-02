@@ -173,6 +173,13 @@ it("opens agent configuration by default and controls the agent", async () => {
   expect(heading.closest(".agent-detail-content")).not.toBeNull();
   const header = heading.closest("header");
   expect(header).not.toBeNull();
+  expect(within(header!).getByText("Agent")).toHaveClass("eyebrow");
+  const headerMeta = header!.querySelector(".agent-header-meta");
+  expect(headerMeta).not.toBeNull();
+  expect(headerMeta).toHaveTextContent("空闲");
+  expect(headerMeta).toHaveTextContent("工程");
+  expect(headerMeta).toHaveTextContent("codex_local");
+  expect(headerMeta).toHaveTextContent("Build owner");
   expect(within(header!).getByText("空闲")).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "分配任务" })).toBeInTheDocument();
   expect(within(header!).getByRole("link", { name: "聊天" })).toHaveAttribute(

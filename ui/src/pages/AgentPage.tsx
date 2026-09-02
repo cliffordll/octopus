@@ -13,7 +13,6 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { FileBrowser } from "../components/FileBrowser";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { SegmentedControl } from "../components/SegmentedControl";
-import { SidebarIcon } from "../components/SidebarIcon";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
 import { runDescriptor, runIssueLabel, runStatusLabel, runTerminalReasonLabel } from "../utils/runDisplay";
@@ -1414,25 +1413,9 @@ export function AgentPage() {
   return (
     <AgentsWorkspace contentClassName="org-content-full tertiary-page-content agent-detail-content" orgId={orgId}>
       <TertiaryPageShell>
-      <TertiaryPageHeader className="agent-page-header">
-        <div className="tertiary-page-identity agent-header-identity">
-          <div aria-hidden="true" className="agent-avatar-lg"><SidebarIcon name="agents" /></div>
-          <div>
-            <div className="agent-title-row">
-              <h1>{agent.data?.name ?? "载入中..."}</h1>
-              {agent.data && <Badge>{statusLabel(agent.data.status)}</Badge>}
-            </div>
-            {agent.data && (
-              <div className="agent-header-meta">
-                <Badge>{roleLabel(agent.data.role)}</Badge>
-                <Badge>{agent.data.agentRuntimeType}</Badge>
-                <span>{agent.data.title ?? "No title"}</span>
-              </div>
-            )}
-          </div>
-        </div>
-        {agent.data && (
-          <div className="tertiary-page-actions agent-header-actions">
+      <TertiaryPageHeader
+        actions={agent.data ? (
+          <>
             <button className="secondary" disabled={operationalDisabled} onClick={() => setTaskDialogOpen(true)} type="button">分配任务</button>
             {canChat ? (
               <Link className="button secondary" to={`/orgs/${orgId}/chats?agentId=${encodeURIComponent(agentId)}`}>聊天</Link>
@@ -1455,9 +1438,19 @@ export function AgentPage() {
                 <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("archive")}>归档</button>
               </div>
             </details>
+          </>
+        ) : undefined}
+        eyebrow="Agent"
+        supporting={agent.data ? (
+          <div className="agent-header-meta">
+              <Badge>{statusLabel(agent.data.status)}</Badge>
+              <Badge>{roleLabel(agent.data.role)}</Badge>
+              <Badge>{agent.data.agentRuntimeType}</Badge>
+              <span>{agent.data.title ?? "No title"}</span>
           </div>
-        )}
-      </TertiaryPageHeader>
+        ) : undefined}
+        title={agent.data?.name ?? "载入中..."}
+      />
       {isPendingApproval && <p className="info-notice">该智能体待审批，审批通过前不能运行、唤醒、聊天或分配任务。</p>}
       {action.error && <ErrorNotice error={action.error} />}
       {invoke.error && <ErrorNotice error={invoke.error} />}

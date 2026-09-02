@@ -147,13 +147,8 @@ export function IssuesPage() {
   return (
     <IssuesWorkspace contentClassName="org-content-full tertiary-page-content" orgId={orgId}>
       <TertiaryPageShell>
-        <TertiaryPageHeader className="issues-page-header">
-          <div>
-            <p className="eyebrow">Issues</p>
-            <h1>{viewTitle}</h1>
-            <p className="muted">{viewDescription}</p>
-          </div>
-          {!followingOnly && (
+        <TertiaryPageHeader
+          actions={!followingOnly ? (
             <div className="org-page-actions">
               <button
                 className="org-primary-action"
@@ -166,8 +161,11 @@ export function IssuesPage() {
                 新建任务
               </button>
             </div>
-          )}
-        </TertiaryPageHeader>
+          ) : undefined}
+          eyebrow="Issues"
+          supporting={viewDescription}
+          title={viewTitle}
+        />
         <TertiaryPageViewport className="issues-page-viewport">
           {agents.error && <ErrorNotice error={agents.error} />}
           {hierarchy.error && <ErrorNotice error={hierarchy.error} />}

@@ -8,7 +8,7 @@ import type { ChatConversation, ChatMessage } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { TertiaryPageHeader } from "../components/TertiaryPageShell";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
 import { formatBytes, roleLabel, statusLabel } from "../utils/display";
 
 interface ChatRouteState {
@@ -461,18 +461,18 @@ export function ChatPage() {
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       {chat.data && (
-        <section className="chat-thread-shell">
-          <TertiaryPageHeader className="chat-thread-header">
-            <div>
-              <h1>{chat.data.title}</h1>
-              <p>{boundChatAgentName ? `使用 ${boundChatAgentName}` : "选择智能体后发送消息"}</p>
-            </div>
-            <div className="meta-line">
+        <TertiaryPageShell className="chat-thread-shell">
+          <TertiaryPageHeader
+            eyebrow="Conversation"
+            supporting={<>
+              <span>{boundChatAgentName ? `使用 ${boundChatAgentName}` : "选择智能体后发送消息"}</span>
               <Badge>{statusLabel(chat.data.status)}</Badge>
               {chat.data.isPinned && <Badge>已置顶</Badge>}
               {chat.data.unreadCount ? <Badge>{chat.data.unreadCount} 未读</Badge> : null}
-            </div>
-          </TertiaryPageHeader>
+            </>}
+            title={chat.data.title}
+          />
+          <TertiaryPageViewport className="chat-thread-content tertiary-page-viewport-contained">
           {linkedIssues.length > 0 && (
             <div aria-label="关联任务" className="chat-linked-issues-strip">
               {linkedIssues.map((issue) => (
@@ -683,7 +683,8 @@ export function ChatPage() {
             </div>
             <ChatIssueCreationHelp />
           </form>
-        </section>
+          </TertiaryPageViewport>
+        </TertiaryPageShell>
       )}
     </ChatsWorkspace>
   );

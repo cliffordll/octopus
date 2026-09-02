@@ -67,7 +67,7 @@ it("shows a composer and sends a first message through a selected agent", async 
   const pageHeader = screen.getByRole("heading", { name: "新对话", level: 1 }).closest("header")!;
   expect(pageHeader).toHaveClass("page-header");
   expect(within(pageHeader).getByText("New chat")).toHaveClass("eyebrow");
-  expect(within(pageHeader).getByText("选择智能体并发送第一条消息。")).toHaveClass("muted");
+  expect(within(pageHeader).getByText("选择智能体并发送第一条消息。")).toHaveClass("tertiary-page-supporting");
   expect(screen.getAllByText("选择智能体并发送第一条消息。")).toHaveLength(1);
   expect(within(pageHeader).queryByText("选择智能体后发送消息")).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "你想让智能体处理什么？" })).toBeInTheDocument();
@@ -474,6 +474,7 @@ it("manages a conversation from the sidebar action menu", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats/chat-1");
+  expect(await screen.findByText("Conversation")).toHaveClass("eyebrow");
   expect(await screen.findByRole("heading", { name: "支持会话" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "支持会话 操作" }));
   await userEvent.click(screen.getByRole("button", { name: "重命名" }));

@@ -85,14 +85,11 @@ export function ApprovalPage() {
   const currentPayload = approval.data ? formatPayload(approval.data.payload) : "{}";
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader>
-        <div>
-          <Link className="back-link" to={`/orgs/${orgId}/approvals`}>返回审批管理</Link>
-          <p className="eyebrow">Approval</p>
-          <h1>{approval.data?.type ?? "载入中..."}</h1>
-          <p className="muted">在消息上下文中查看完整请求并做出决策。</p>
-        </div>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader
+        eyebrow={<><Link to={`/orgs/${orgId}/approvals`}>Approvals</Link><span> / Approval</span></>}
+        supporting="在消息上下文中查看完整请求并做出决策。"
+        title={approval.data?.type ?? "载入中..."}
+      />
       {approval.data && (
         <section className="approval-detail-layout">
           <article className="panel approval-detail">

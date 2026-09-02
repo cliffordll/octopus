@@ -59,14 +59,12 @@ export function GoalsPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader className="goals-page-header">
-        <div>
-          <p className="eyebrow">Goals</p>
-          <h1>目标</h1>
-          <p className="muted">维护组织、团队、智能体和任务层级的目标，并跟踪它们之间的父子关系。</p>
-        </div>
-        <button className="org-primary-action" type="button" onClick={() => setDialogOpen(true)}>创建目标</button>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader
+        actions={<button className="org-primary-action" type="button" onClick={() => setDialogOpen(true)}>创建目标</button>}
+        eyebrow="Goals"
+        supporting="维护组织、团队、智能体和任务层级的目标，并跟踪它们之间的父子关系。"
+        title="目标"
+      />
       <section className="panel org-goal-list-card">
         <div className="org-section-header">
           <div>

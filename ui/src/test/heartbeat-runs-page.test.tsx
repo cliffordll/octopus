@@ -56,7 +56,7 @@ it("shows organization heartbeats by agent and supports heartbeat actions", asyn
   expect(await screen.findByRole("heading", { name: "心跳" })).toBeInTheDocument();
   const pageHeader = screen.getByRole("heading", { name: "心跳" }).closest("header")!;
   expect(pageHeader).toHaveClass("page-header");
-  expect(pageHeader.parentElement).toHaveClass("org-content-full");
+  expect(pageHeader.closest(".org-content")).toHaveClass("org-content-full");
   expect(within(pageHeader).getByText("Heartbeat Monitor")).toHaveClass("eyebrow");
   expect(within(pageHeader).getByRole("link", { name: "运行分析" })).toHaveAttribute("href", "/orgs/org-1/run-intelligence");
   const row = await screen.findByTestId("org-heartbeat-row");

@@ -161,21 +161,17 @@ export function GoalPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader>
-        <div>
-          <Link className="back-link" to={`/orgs/${orgId}/goals`}>返回 Goals</Link>
-          <div className="agent-title-row">
-            <h1>{goal.data?.title ?? "Goal"}</h1>
-            {goal.data && <Badge>{statusLabel(goal.data.status)}</Badge>}
-          </div>
-        </div>
-        {goal.data && (
-          <div className="agent-header-actions">
+      <TertiaryPageHeader
+        actions={goal.data ? (
+          <>
             <button className="secondary" disabled={update.isPending} onClick={() => update.mutate({ status: "cancelled" })} type="button">Cancel goal</button>
             <button className="danger" disabled={remove.isPending || (dependencies.data?.blockers.length ?? 0) > 0} onClick={() => remove.mutate()} type="button">删除</button>
-          </div>
-        )}
-      </TertiaryPageHeader>
+          </>
+        ) : undefined}
+        eyebrow={<><Link to={`/orgs/${orgId}/goals`}>Goals</Link><span> / Goal</span></>}
+        supporting={goal.data ? <Badge>{statusLabel(goal.data.status)}</Badge> : undefined}
+        title={goal.data?.title ?? "Goal"}
+      />
       {goal.data && (
         <>
           <div className="goal-summary-grid">

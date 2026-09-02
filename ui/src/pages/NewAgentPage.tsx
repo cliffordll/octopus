@@ -258,12 +258,10 @@ export function NewAgentPage() {
   const { orgId = "" } = useParams();
   return (
     <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader>
-        <div>
-          <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
-          <h1>新建智能体</h1>
-        </div>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader
+        eyebrow={<><Link to={`/orgs/${orgId}/agents`}>Agents</Link><span> / New agent</span></>}
+        title="新建智能体"
+      />
       <AgentCreateForm orgId={orgId} />
     </AgentsWorkspace>
   );

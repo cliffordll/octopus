@@ -7,7 +7,7 @@ import {
   type PermissionKey,
 } from "../api/access";
 import { ErrorNotice } from "./ErrorNotice";
-import { TertiaryPageHeader } from "./TertiaryPageShell";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "./TertiaryPageShell";
 
 const PERMISSIONS: Array<{ key: PermissionKey; label: string }> = [
   { key: "agents:create", label: "创建智能体" },
@@ -154,18 +154,17 @@ export function MemberAccessSettings({ orgId }: { orgId?: string }) {
   }
 
   return (
-    <section className="settings-empty-section access-settings" aria-label="组织成员">
-      <TertiaryPageHeader className="members-page-header">
-        <div>
-          <p className="eyebrow">Organization Members</p>
-          <h1>组织成员</h1>
-          <p className="muted">管理成员、邀请和组织权限。Human 与智能体使用同一套授权规则。</p>
-        </div>
-        <button disabled={createInvite.isPending} onClick={() => createInvite.mutate()} type="button">创建邀请</button>
-      </TertiaryPageHeader>
-      {(members.error || invites.error) && <ErrorNotice error={members.error || invites.error} />}
-      {createdLink && <input aria-label="新邀请链接" readOnly value={createdLink} />}
-      <div className="access-scroll-area">
+    <TertiaryPageShell className="settings-empty-section access-settings" aria-label="组织成员" role="region">
+      <TertiaryPageHeader
+        actions={<button disabled={createInvite.isPending} onClick={() => createInvite.mutate()} type="button">创建邀请</button>}
+        eyebrow="Organization Members"
+        supporting="管理成员、邀请和组织权限。Human 与智能体使用同一套授权规则。"
+        title="组织成员"
+      />
+      <TertiaryPageViewport className="access-page-viewport tertiary-page-viewport-contained">
+        {(members.error || invites.error) && <ErrorNotice error={members.error || invites.error} />}
+        {createdLink && <input aria-label="新邀请链接" readOnly value={createdLink} />}
+        <div className="access-scroll-area">
         <section className="panel access-section" aria-labelledby="organization-members-title">
           <header className="org-section-header">
             <div><p className="eyebrow">Members</p><h2 id="organization-members-title">成员</h2></div>
@@ -191,7 +190,8 @@ export function MemberAccessSettings({ orgId }: { orgId?: string }) {
             ))}
           </div>
         </section>
-      </div>
-    </section>
+        </div>
+      </TertiaryPageViewport>
+    </TertiaryPageShell>
   );
 }

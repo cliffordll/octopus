@@ -126,13 +126,11 @@ export function ApprovalsPage() {
 
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader>
-        <div>
-          <p className="eyebrow">Approvals</p>
-          <h1>审批管理</h1>
-          <p className="muted">审批对象保留在消息上下文中处理，避免决策脱离对话。</p>
-        </div>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader
+        eyebrow="Approvals"
+        supporting="审批对象保留在消息上下文中处理，避免决策脱离对话。"
+        title="审批管理"
+      />
       <section className="approval-management">
         <div className="approval-toolbar">
           <button className={status === "" ? "secondary active" : "secondary"} onClick={() => setStatus("")} type="button">全部</button>

@@ -51,7 +51,7 @@ it("shows messenger threads and marks a chat thread read", async () => {
   renderApp("/orgs/org-1/messenger");
   expect(await screen.findByRole("heading", { name: "消息中心" })).toBeInTheDocument();
   const pageHeader = screen.getByRole("heading", { name: "消息中心" }).closest("header")!;
-  expect(within(pageHeader).getByText("查看对话消息、任务动态、审批和系统提醒。")).toHaveClass("muted");
+  expect(within(pageHeader).getByText("查看对话消息、任务动态、审批和系统提醒。")).toHaveClass("tertiary-page-supporting");
   expect(await screen.findByText("部署讨论")).toBeInTheDocument();
   expect(screen.getByText("2 未读")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "打开对话" })).toHaveAttribute("href", "/orgs/org-1/chats/chat-1");

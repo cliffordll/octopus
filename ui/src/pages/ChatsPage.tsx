@@ -8,7 +8,7 @@ import { projectsApi } from "../api/projects";
 import type { ChatMessage } from "../api/types";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { TertiaryPageHeader } from "../components/TertiaryPageShell";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
 import { roleLabel } from "../utils/display";
 
 function skillLabel(entry: Record<string, unknown>) {
@@ -123,18 +123,13 @@ export function ChatsPage() {
   }
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <section className="chat-panel">
-        <TertiaryPageHeader>
-          <div>
-            <p className="eyebrow">New chat</p>
-            <h1>新对话</h1>
-            <p className="muted">选择智能体并发送第一条消息。</p>
+      <TertiaryPageShell className="chat-panel">
+        <TertiaryPageHeader eyebrow="New chat" supporting="选择智能体并发送第一条消息。" title="新对话" />
+        <TertiaryPageViewport className="chat-panel-content tertiary-page-viewport-contained">
+          <div className="chat-empty-state">
+            <h2>你想让智能体处理什么？</h2>
           </div>
-        </TertiaryPageHeader>
-        <div className="chat-empty-state">
-          <h2>你想让智能体处理什么？</h2>
-        </div>
-        <form className="form chat-composer" onSubmit={submit}>
+          <form className="form chat-composer" onSubmit={submit}>
           {agents.isSuccess && chatAgentList.length === 0 && (
             <p className="muted">暂无可用于对话的智能体，请先创建或恢复智能体。</p>
           )}
@@ -226,8 +221,9 @@ export function ChatsPage() {
             <span className="muted">项目和技能作为上下文展示，消息会发送给所选智能体。</span>
             <ChatIssueCreationHelp />
           </div>
-        </form>
-      </section>
+          </form>
+        </TertiaryPageViewport>
+      </TertiaryPageShell>
     </ChatsWorkspace>
   );
 }

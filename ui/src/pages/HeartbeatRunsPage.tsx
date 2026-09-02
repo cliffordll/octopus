@@ -186,14 +186,12 @@ export function HeartbeatRunsPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader className="heartbeat-page-header">
-        <div>
-          <p className="eyebrow">Heartbeat Monitor</p>
-          <h1>心跳</h1>
-          <p className="muted">这里汇总智能体状态检测、运行记录和手动诊断。状态检测默认每 300s 执行一次，不等于执行任务。</p>
-        </div>
-        <Link className="button org-primary-action" to={`/orgs/${orgId}/run-intelligence`}>运行分析</Link>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader
+        actions={<Link className="button org-primary-action" to={`/orgs/${orgId}/run-intelligence`}>运行分析</Link>}
+        eyebrow="Heartbeat Monitor"
+        supporting="这里汇总智能体状态检测、运行记录和手动诊断。状态检测默认每 300s 执行一次，不等于执行任务。"
+        title="心跳"
+      />
       {agents.error && <ErrorNotice error={agents.error} />}
       {runs.error && <ErrorNotice error={runs.error} />}
       {setHeartbeatEnabled.error && <ErrorNotice error={setHeartbeatEnabled.error} />}

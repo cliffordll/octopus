@@ -28,13 +28,11 @@ export function MessengerPage() {
 
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <TertiaryPageHeader>
-        <div>
-          <p className="eyebrow">Messenger</p>
-          <h1>消息中心</h1>
-          <p className="muted">查看对话消息、任务动态、审批和系统提醒。</p>
-        </div>
-      </TertiaryPageHeader>
+      <TertiaryPageHeader
+        eyebrow="Messenger"
+        supporting="查看对话消息、任务动态、审批和系统提醒。"
+        title="消息中心"
+      />
       <section className="panel">
         <h2>线程</h2>
         {threads.error && <ErrorNotice error={threads.error} />}
