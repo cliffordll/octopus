@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +52,8 @@ from packages.shared.types.approval import (
 from packages.shared.types.chat import ConvertChatToIssuePayload
 from packages.shared.types.issue import IssueListItem
 from .chats import ChatService
+
+logger = logging.getLogger(__name__)
 
 APPROVAL_CREATE_TO_COLUMN: dict[str, str] = {
     "type": "type",
@@ -350,6 +353,10 @@ class ApprovalService:
         if row is None:
             return None
 
+        notification = _requester_notification(row, status=status)
+        activity_details = dict(payload)
+        if notification is not None:
+            activity_details["notification"] = notification
         await insert_activity_log(
             self._session,
             org_id=row.org_id,
@@ -358,7 +365,8 @@ class ApprovalService:
             action=action,
             entity_type="approval",
             entity_id=row.id,
-            details=dict(payload),
+            agent_id=row.requested_by_agent_id,
+            details=activity_details,
         )
         await self._apply_hire_agent_decision(
             row,
@@ -372,7 +380,61 @@ class ApprovalService:
             actor_type=actor_type,
             actor_id=actor_id,
         )
+        await self._notify_requesting_agent(
+            row,
+            status=status,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
         return _to_detail(row)
+
+    async def _notify_requesting_agent(
+        self,
+        approval: Approval,
+        *,
+        status: ApprovalStatus,
+        actor_type: str,
+        actor_id: str,
+    ) -> None:
+        agent_id = approval.requested_by_agent_id
+        if not agent_id:
+            return
+        from .heartbeat import HeartbeatService
+
+        notification = {
+            "approvalId": approval.id,
+            "approvalStatus": status,
+            "approvalType": approval.type,
+            "decisionNote": approval.decision_note,
+        }
+        try:
+            await HeartbeatService(self._session).wakeup(
+                agent_id,
+                {
+                    "source": "review",
+                    "triggerDetail": "callback",
+                    "reason": "approval_decided",
+                    "payload": notification,
+                    "contextSnapshot": {
+                        **notification,
+                        "source": "approval_decision",
+                        "wakeReason": "approval_decided",
+                    },
+                    "idempotencyKey": (
+                        f"approval:{approval.id}:{status}:"
+                        f"{approval.updated_at.isoformat()}"
+                    ),
+                },
+                actor_type=actor_type,
+                actor_id=actor_id,
+                execute_immediately=False,
+            )
+        except Exception:
+            logger.warning(
+                "failed to queue approval decision notification for requesting agent",
+                extra={"approval_id": approval.id, "agent_id": agent_id},
+                exc_info=True,
+            )
 
     async def _apply_chat_issue_creation_decision(
         self,
@@ -529,6 +591,26 @@ def _to_issue_list_item(row: IssueRow) -> IssueListItem:
 
 def _redact_payload(payload: dict[str, object]) -> dict[str, object]:
     return {key: _redact_value(key, value) for key, value in payload.items()}
+
+
+def _requester_notification(
+    approval: Approval, *, status: ApprovalStatus
+) -> dict[str, object] | None:
+    if approval.requested_by_agent_id:
+        return {
+            "recipientType": "agent",
+            "recipientId": approval.requested_by_agent_id,
+            "status": status,
+            "decisionNote": approval.decision_note,
+        }
+    if approval.requested_by_user_id:
+        return {
+            "recipientType": "human",
+            "recipientId": approval.requested_by_user_id,
+            "status": status,
+            "decisionNote": approval.decision_note,
+        }
+    return None
 
 
 def _redact_value(key: str, value: object) -> object:

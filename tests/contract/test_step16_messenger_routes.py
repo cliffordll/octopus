@@ -274,8 +274,9 @@ async def test_messenger_issue_approval_and_system_threads(
                 id=approval_id,
                 org_id=org_id,
                 type="chat_issue_creation",
-                status="pending",
-                requested_by_user_id="local-board",
+                status="approved",
+                requested_by_user_id="legacy-contract-root",
+                decision_note="内容完整，可以执行。",
                 payload={
                     "proposedIssue": {
                         "title": "Fix approval copy",
@@ -306,7 +307,15 @@ async def test_messenger_issue_approval_and_system_threads(
     assert approvals_code == 200
     assert approvals["summary"]["threadKey"] == "approvals"
     assert approvals["detail"]["items"][0]["approval"]["id"] == approval_id
-    assert "Fix approval copy" in approvals["detail"]["items"][0]["preview"]
+    assert approvals["detail"]["items"][0]["title"] == (
+        "你的审批已同意 · Fix approval copy"
+    )
+    assert approvals["detail"]["items"][0]["preview"] == (
+        "审核意见：内容完整，可以执行。"
+    )
+    assert (
+        approvals["detail"]["items"][0]["metadata"]["decisionNotificationForMe"] is True
+    )
 
     read_code, read_state = await _request(
         application,

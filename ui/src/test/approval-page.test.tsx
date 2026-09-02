@@ -68,7 +68,7 @@ it("shows an approval and submits a board decision", async () => {
   await userEvent.type(screen.getByLabelText("决策备注"), "额度合理");
   const decisionActions = screen.getByRole("button", { name: "同意" }).closest(".approval-actions");
   expect(decisionActions).toContainElement(screen.getByRole("button", { name: "拒绝" }));
-  expect(decisionActions).toContainElement(screen.getByRole("button", { name: "请求修改" }));
+  expect(decisionActions).toContainElement(screen.getByRole("button", { name: "退回" }));
   await userEvent.clear(screen.getByLabelText("决策 Payload JSON"));
   fireEvent.change(screen.getByLabelText("决策 Payload JSON"), { target: { value: '{"approvedLimit":1000}' } });
   await userEvent.click(screen.getByRole("button", { name: "同意" }));
@@ -243,6 +243,7 @@ it("shows approval management cards and resolves a pending approval", async () =
   expect(within(statusFilter).getByRole("button", { name: "已同意" })).toBeInTheDocument();
   expect(within(statusFilter).getByRole("button", { name: "已拒绝" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "读取 README.md 并生成标题文档" })).toBeInTheDocument();
+  expect(screen.getByText("读取 README.md 的内容。")).toBeInTheDocument();
   expect(screen.getByText("chat_issue_creation")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "创建审批" }));
   const dialog = screen.getByRole("dialog");
@@ -270,16 +271,24 @@ it("shows approval management cards and resolves a pending approval", async () =
   );
   expect(screen.queryByRole("link", { name: "查看详情" })).not.toBeInTheDocument();
   expect(screen.queryByText("任务标题")).not.toBeInTheDocument();
-  expect(screen.getByText("审批类型")).toBeInTheDocument();
-  expect(screen.getByText("所属项目")).toBeInTheDocument();
-  expect(screen.getByText("dev_shared")).toBeInTheDocument();
-  expect(screen.getByText("发起方")).toBeInTheDocument();
-  expect(screen.getByText("Agent · Reviewer")).toBeInTheDocument();
-  expect(screen.getByText("创建时间")).toBeInTheDocument();
+  expect(screen.getByText("审批事项")).toBeInTheDocument();
+  expect(screen.getByText("状态与操作")).toBeInTheDocument();
+  expect(screen.getByLabelText("审批类型：chat_issue_creation")).toBeInTheDocument();
+  expect(screen.getByLabelText("所属项目：dev_shared")).toBeInTheDocument();
+  expect(screen.getByLabelText("发起方：Agent · Reviewer")).toBeInTheDocument();
+  expect(screen.getByLabelText(/创建时间：/)).toBeInTheDocument();
+  expect(screen.getByText("待处理")).toHaveClass("approval-status-badge", "pending");
 
+  expect(screen.queryByText("更多")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "同意" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "退回" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "拒绝" }));
+  const decisionDialog = screen.getByRole("dialog");
+  expect(within(decisionDialog).getByRole("heading", { name: "拒绝审批" })).toBeInTheDocument();
+  await userEvent.type(within(decisionDialog).getByLabelText("审核意见"), "内容不符合要求");
+  await userEvent.click(within(decisionDialog).getByRole("button", { name: "确认拒绝" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/approvals/approval-1/reject",
-    expect.objectContaining({ method: "POST", body: JSON.stringify({}) }),
+    expect.objectContaining({ method: "POST", body: JSON.stringify({ decisionNote: "内容不符合要求" }) }),
   );
 });

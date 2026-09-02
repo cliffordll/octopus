@@ -7,7 +7,6 @@ import { approvalsApi } from "../api/approvals";
 import { messengerApi } from "../api/messenger";
 import { projectsApi } from "../api/projects";
 import type { ApprovalDetail, ApprovalListItem, ApprovalStatus } from "../api/types";
-import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { TertiaryPageHeader } from "../components/TertiaryPageShell";
@@ -20,6 +19,14 @@ const STATUS_OPTIONS: Array<{ value: ApprovalStatus; label: string }> = [
   { value: "rejected", label: "已拒绝" },
 ];
 
+type ApprovalDecisionAction = "approve" | "reject" | "requestRevision";
+
+const DECISION_LABELS: Record<ApprovalDecisionAction, string> = {
+  approve: "同意",
+  reject: "拒绝",
+  requestRevision: "退回",
+};
+
 function approvalTitle(approval: ApprovalListItem) {
   return approval.type;
 }
@@ -29,6 +36,13 @@ function proposedIssueTitle(approval?: ApprovalDetail | null): string | null {
   if (!proposedIssue || typeof proposedIssue !== "object" || Array.isArray(proposedIssue)) return null;
   const title = (proposedIssue as Record<string, unknown>).title;
   return typeof title === "string" && title.trim() ? title.trim() : null;
+}
+
+function proposedIssueDescription(approval?: ApprovalDetail | null): string | null {
+  const proposedIssue = approval?.payload?.proposedIssue;
+  if (!proposedIssue || typeof proposedIssue !== "object" || Array.isArray(proposedIssue)) return null;
+  const description = (proposedIssue as Record<string, unknown>).description;
+  return typeof description === "string" && description.trim() ? description.trim() : null;
 }
 
 function approvalFromMessengerItem(item: Record<string, unknown>): ApprovalDetail | null {
@@ -73,6 +87,12 @@ export function ApprovalsPage() {
   const [requestedByAgentId, setRequestedByAgentId] = useState("");
   const [issueIds, setIssueIds] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
+  const [decisionDialog, setDecisionDialog] = useState<{
+    action: ApprovalDecisionAction;
+    approvalId: string;
+    title: string;
+  } | null>(null);
+  const [decisionNote, setDecisionNote] = useState("");
   const queryClient = useQueryClient();
   const approvals = useQuery({
     queryKey: ["messenger-approvals", orgId],
@@ -91,9 +111,11 @@ export function ApprovalsPage() {
     queryFn: () => projectsApi.list(orgId),
   });
   const decision = useMutation({
-    mutationFn: ({ approvalId, action }: { approvalId: string; action: "approve" | "reject" | "requestRevision" }) =>
-      approvalsApi[action](approvalId),
+    mutationFn: ({ approvalId, action, note }: { approvalId: string; action: ApprovalDecisionAction; note: string }) =>
+      approvalsApi[action](approvalId, note.trim() ? { decisionNote: note.trim() } : {}),
     onSuccess: (approval) => {
+      setDecisionDialog(null);
+      setDecisionNote("");
       void queryClient.invalidateQueries({ queryKey: ["messenger-approvals", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["approval", approval.id] });
@@ -139,6 +161,26 @@ export function ApprovalsPage() {
     createApproval.mutate();
   }
 
+  function openDecisionDialog(approval: ApprovalDetail, action: ApprovalDecisionAction) {
+    decision.reset();
+    setDecisionNote("");
+    setDecisionDialog({
+      action,
+      approvalId: approval.id,
+      title: proposedIssueTitle(approval) ?? approvalTitle(approval),
+    });
+  }
+
+  function submitDecision(event: FormEvent) {
+    event.preventDefault();
+    if (!decisionDialog) return;
+    decision.mutate({
+      action: decisionDialog.action,
+      approvalId: decisionDialog.approvalId,
+      note: decisionNote,
+    });
+  }
+
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <TertiaryPageHeader
@@ -148,8 +190,8 @@ export function ApprovalsPage() {
       />
       <section className="approval-management">
         <div className="approval-toolbar">
-          <button className={status === "" ? "secondary active" : "secondary"} onClick={() => setStatus("")} type="button">全部</button>
           <div aria-label="审批状态筛选" className="approval-status-filter" role="group">
+            <button className={status === "" ? "active" : ""} onClick={() => setStatus("")} type="button">全部</button>
             {STATUS_OPTIONS.map((option) => (
               <button
                 className={status === option.value ? "active" : ""}
@@ -161,18 +203,15 @@ export function ApprovalsPage() {
               </button>
             ))}
           </div>
-          <button className="secondary" onClick={() => setCreateDialogOpen(true)} type="button">创建审批</button>
+          <button className="secondary approval-create-action" onClick={() => setCreateDialogOpen(true)} type="button">创建审批</button>
         </div>
         {approvals.error && <ErrorNotice error={approvals.error} />}
-        {decision.error && <ErrorNotice error={decision.error} />}
+        {decision.error && !decisionDialog && <ErrorNotice error={decision.error} />}
         <div className="approval-thread">
           {approvalList.length > 0 && (
             <div aria-hidden="true" className="approval-list-columns">
+              <span />
               <span>审批事项</span>
-              <span>审批类型</span>
-              <span>所属项目</span>
-              <span>发起方</span>
-              <span>创建时间</span>
               <span>状态与操作</span>
             </div>
           )}
@@ -182,7 +221,7 @@ export function ApprovalsPage() {
               decisionPending={decision.isPending}
               key={approval.id}
               memberLabels={memberLabels}
-              onDecision={(action) => decision.mutate({ approvalId: approval.id, action })}
+              onDecision={(action) => openDecisionDialog(approval, action)}
               orgId={orgId}
               projectNames={projectNames}
             />
@@ -242,6 +281,66 @@ export function ApprovalsPage() {
           </section>
         </div>
       )}
+      {decisionDialog && (
+        <div aria-modal="true" className="modal-backdrop" role="dialog">
+          <section className="panel task-modal approval-decision-dialog">
+            <div className="task-modal-header">
+              <div>
+                <p className="eyebrow">Approval Decision</p>
+                <h2>{DECISION_LABELS[decisionDialog.action]}审批</h2>
+              </div>
+              <button
+                className="secondary"
+                disabled={decision.isPending}
+                onClick={() => {
+                  setDecisionDialog(null);
+                  setDecisionNote("");
+                  decision.reset();
+                }}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
+            <p className="approval-decision-target" title={decisionDialog.title}>审批事项：{decisionDialog.title}</p>
+            <form className="form" onSubmit={submitDecision}>
+              <label>
+                审核意见{decisionDialog.action === "approve" ? "（可选）" : ""}
+                <textarea
+                  aria-label="审核意见"
+                  autoFocus
+                  onChange={(event) => setDecisionNote(event.target.value)}
+                  placeholder={decisionDialog.action === "requestRevision" ? "说明退回原因及需要修改的内容" : "填写本次审核意见"}
+                  required={decisionDialog.action !== "approve"}
+                  value={decisionNote}
+                />
+              </label>
+              {decision.error && <ErrorNotice error={decision.error} />}
+              <div className="task-modal-actions">
+                <button
+                  className="secondary"
+                  disabled={decision.isPending}
+                  onClick={() => {
+                    setDecisionDialog(null);
+                    setDecisionNote("");
+                    decision.reset();
+                  }}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className={decisionDialog.action === "reject" ? "danger" : undefined}
+                  disabled={decision.isPending}
+                  type="submit"
+                >
+                  确认{DECISION_LABELS[decisionDialog.action]}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </ChatsWorkspace>
   );
 }
@@ -257,11 +356,12 @@ function ApprovalCard({
   approval: ApprovalDetail;
   decisionPending: boolean;
   memberLabels: Map<string, string>;
-  onDecision: (action: "approve" | "reject" | "requestRevision") => void;
+  onDecision: (action: ApprovalDecisionAction) => void;
   orgId: string;
   projectNames: Map<string, string>;
 }) {
   const issueTitle = proposedIssueTitle(approval);
+  const issueDescription = proposedIssueDescription(approval);
   const projectId = proposedIssueProjectId(approval);
   const projectName = projectId ? projectNames.get(projectId) ?? compactId(projectId) : "—";
   const requesterId = approval.requestedByAgentId ?? approval.requestedByUserId;
@@ -272,30 +372,28 @@ function ApprovalCard({
   const pending = approval.status === "pending";
   return (
     <article className="approval-list-item">
-      <h2>
-        <Link className="approval-list-link" to={`/orgs/${orgId}/approvals/${approval.id}`}>
-          {issueTitle ?? approvalTitle(approval)}
-        </Link>
-      </h2>
-      <span className="approval-list-value">{approval.type}</span>
-      <span className="approval-list-value" title={projectId ?? undefined}>{projectName}</span>
-      <span className="approval-list-value" title={requesterId ?? undefined}>{requesterName}</span>
-      <time className="approval-list-value">{formatDate(approval.createdAt)}</time>
+      <span aria-hidden="true" className={`approval-list-status-dot ${approval.status}`} />
+      <div className="approval-list-summary">
+        <h2>
+          <Link className="approval-list-link" to={`/orgs/${orgId}/approvals/${approval.id}`}>
+            {issueTitle ?? approvalTitle(approval)}
+          </Link>
+        </h2>
+        {issueDescription && <p title={issueDescription}>{issueDescription}</p>}
+        <div className="approval-list-meta">
+          <span aria-label={`审批类型：${approval.type}`}>{approval.type}</span>
+          <span aria-label={`所属项目：${projectName}`} title={projectId ?? undefined}>{projectName}</span>
+          <span aria-label={`发起方：${requesterName}`} title={requesterId ?? undefined}>{requesterName}</span>
+          <time aria-label={`创建时间：${formatDate(approval.createdAt)}`}>{formatDate(approval.createdAt)}</time>
+        </div>
+      </div>
       <div className="approval-list-controls">
-        <Badge>{statusLabel(approval.status)}</Badge>
+        <span className={`approval-status-badge ${approval.status}`}>{statusLabel(approval.status)}</span>
         {pending && (
-          <div className="approval-actions">
-            <>
-              <button disabled={decisionPending} onClick={() => onDecision("approve")} type="button">
-                同意
-              </button>
-              <button className="danger" disabled={decisionPending} onClick={() => onDecision("reject")} type="button">
-                拒绝
-              </button>
-              <button className="secondary" disabled={decisionPending} onClick={() => onDecision("requestRevision")} type="button">
-                请求修改
-              </button>
-            </>
+          <div className="approval-list-actions">
+            <button className="approve" disabled={decisionPending} onClick={() => onDecision("approve")} type="button">同意</button>
+            <button className="reject" disabled={decisionPending} onClick={() => onDecision("reject")} type="button">拒绝</button>
+            <button className="revision" disabled={decisionPending} onClick={() => onDecision("requestRevision")} type="button">退回</button>
           </div>
         )}
       </div>

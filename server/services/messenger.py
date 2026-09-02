@@ -357,7 +357,13 @@ def _issue_item(row: IssueRow, user_id: str) -> MessengerIssueThreadItem:
 
 def _approval_item(row: ApprovalRow, user_id: str) -> MessengerApprovalThreadItem:
     detail = _approval_detail(row)
-    title = _approval_title(row)
+    requested_by_me = row.requested_by_user_id == user_id
+    decision_label = _approval_decision_label(row.status)
+    title = (
+        f"你的审批已{decision_label} · {_approval_subject(row)}"
+        if requested_by_me and decision_label is not None
+        else _approval_title(row)
+    )
     preview = _approval_preview(row)
     return {
         "id": row.id,
@@ -384,7 +390,8 @@ def _approval_item(row: ApprovalRow, user_id: str) -> MessengerApprovalThreadIte
         "metadata": {
             "approvalId": row.id,
             "status": row.status,
-            "requestedByMe": row.requested_by_user_id == user_id,
+            "requestedByMe": requested_by_me,
+            "decisionNotificationForMe": requested_by_me and decision_label is not None,
         },
         "approval": detail,
     }
@@ -421,19 +428,54 @@ def _approval_preview(row: ApprovalRow) -> str:
     if isinstance(candidate, dict):
         title = str(candidate.get("title") or "").strip()
         description = str(candidate.get("description") or "").strip()
-        return (
+        base_preview = (
             _format_preview(" · ".join(part for part in (title, description) if part))
             or "Approval request"
         )
+        return _approval_decision_preview(row, base_preview)
     candidate = payload.get("operationProposal")
     if isinstance(candidate, dict):
-        return (
+        base_preview = (
             _format_preview(
                 str(candidate.get("summary") or "Agent proposed an operation")
             )
             or "Agent proposed an operation"
         )
-    return _format_preview(str(row.type)) or "Approval request"
+        return _approval_decision_preview(row, base_preview)
+    return _approval_decision_preview(
+        row, _format_preview(str(row.type)) or "Approval request"
+    )
+
+
+def _approval_subject(row: ApprovalRow) -> str:
+    payload = row.payload or {}
+    proposed_issue = payload.get("proposedIssue")
+    if isinstance(proposed_issue, dict):
+        title = str(proposed_issue.get("title") or "").strip()
+        if title:
+            return title
+    operation = payload.get("operationProposal")
+    if isinstance(operation, dict):
+        summary = str(operation.get("summary") or "").strip()
+        if summary:
+            return summary
+    return _approval_title(row)
+
+
+def _approval_decision_label(status: str) -> str | None:
+    return {
+        "approved": "同意",
+        "rejected": "拒绝",
+        "revision_requested": "退回",
+    }.get(status)
+
+
+def _approval_decision_preview(row: ApprovalRow, fallback: str) -> str:
+    decision_label = _approval_decision_label(row.status)
+    if decision_label is None:
+        return fallback
+    decision_note = (row.decision_note or "").strip()
+    return f"审核意见：{decision_note}" if decision_note else f"审批已{decision_label}"
 
 
 def _format_preview(value: str | None, max_length: int = 140) -> str | None:

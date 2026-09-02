@@ -259,7 +259,7 @@ export function ApprovalPage() {
                 <label>
                   决策备注
                   <textarea
-                    placeholder="可选：说明同意、拒绝或请求修改的原因。"
+                    placeholder="可选：说明同意、拒绝或退回的原因。"
                     value={decisionNote}
                     onChange={(event) => setDecisionNote(event.target.value)}
                   />
@@ -276,7 +276,7 @@ export function ApprovalPage() {
                   <button disabled={act.isPending} onClick={() => runAction("approve")} type="button">同意</button>
                   <button className="danger" disabled={act.isPending} onClick={() => runAction("reject")} type="button">拒绝</button>
                   <button className="secondary" disabled={act.isPending} onClick={() => runAction("requestRevision")} type="button">
-                    请求修改
+                    退回
                   </button>
                 </div>
               </>

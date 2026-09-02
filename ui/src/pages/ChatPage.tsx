@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { approvalsApi } from "../api/approvals";
 import { chatsApi } from "../api/chats";
 import type { ChatConversation, ChatMessage } from "../api/types";
 import { Badge } from "../components/Badge";
+import { ChatComposerContextBar } from "../components/ChatComposerContextBar";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
@@ -97,10 +98,6 @@ function chatApprovalStatusLabel(status: ChatApprovalPromptStatus): string {
   return "待审批";
 }
 
-function focusLeftElement(event: ReactFocusEvent<HTMLElement>) {
-  return !(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget);
-}
-
 export function ChatPage() {
   const { orgId = "", chatId = "" } = useParams();
   const location = useLocation();
@@ -112,7 +109,6 @@ export function ChatPage() {
   const [thinkingChatId, setThinkingChatId] = useState<string | null>(null);
   const [streamingReply, setStreamingReply] = useState("");
   const [initialMessageInFlight, setInitialMessageInFlight] = useState(Boolean(routeState?.initialMessage));
-  const [skillDropdownOpen, setSkillDropdownOpen] = useState(false);
   const [approvalPrompt, setApprovalPrompt] = useState<{
     approvalId: string;
     proposal: Record<string, unknown>;
@@ -121,7 +117,6 @@ export function ChatPage() {
   } | null>(null);
   const [dismissedApprovalIds, setDismissedApprovalIds] = useState<Set<string>>(() => new Set());
   const messageThreadRef = useRef<HTMLDivElement | null>(null);
-  const skillDropdownRef = useRef<HTMLDetailsElement | null>(null);
   const initialMessageStartedRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -161,20 +156,6 @@ export function ChatPage() {
   const approvalPromptStatus = (
     approvalPromptDetail.data?.status as ChatApprovalPromptStatus | undefined
   ) ?? approvalPrompt?.status ?? null;
-  useEffect(() => {
-    if (!skillDropdownOpen) return;
-    function closeWhenOutside(event: Event) {
-      if (event.target instanceof Node && !skillDropdownRef.current?.contains(event.target)) {
-        setSkillDropdownOpen(false);
-      }
-    }
-    document.addEventListener("pointerdown", closeWhenOutside);
-    document.addEventListener("focusin", closeWhenOutside);
-    return () => {
-      document.removeEventListener("pointerdown", closeWhenOutside);
-      document.removeEventListener("focusin", closeWhenOutside);
-    };
-  }, [skillDropdownOpen]);
   const visibleMessages = useMemo(() => {
     const persisted = messages.data ?? [];
     const persistedUserBodies = new Set(
@@ -624,81 +605,45 @@ export function ChatPage() {
             )}
             {selectedAgentSkills.error && <ErrorNotice error={selectedAgentSkills.error} />}
             {updatePlanMode.error && <ErrorNotice error={updatePlanMode.error} />}
-            <div className="chat-context-controls chat-context-controls-readonly" aria-label="当前对话上下文">
-              <label aria-label="当前项目">
-                <select aria-label="项目" disabled value={projectContext?.entityId ?? ""}>
-                  <option value={projectContext?.entityId ?? ""}>
-                    {projectContext?.entity?.label ?? (projectContext ? projectContext.entityId : "未关联项目")}
-                  </option>
-                </select>
-              </label>
-              <label aria-label="当前智能体" className="chat-agent-readonly-field">
+            <ChatComposerContextBar
+              agentControl={(
                 <select aria-label="对话智能体" disabled value={agentId}>
                   <option value={agentId}>{selectedAgentControlLabel}</option>
                 </select>
-              </label>
-              <label aria-label="当前任务创建模式">
+              )}
+              issueCreationModeControl={(
                 <select aria-label="任务创建模式" disabled value={chat.data?.issueCreationMode ?? "manual_approval"}>
                   <option value={chat.data?.issueCreationMode ?? "manual_approval"}>
                     {chatIssueCreationModeLabel(chat.data?.issueCreationMode)}
                   </option>
                 </select>
-              </label>
-              <label className="chat-plan-mode-toggle">
-                <input
-                  aria-label="计划模式"
-                  checked={Boolean(chat.data?.planMode)}
-                  disabled={updatePlanMode.isPending}
-                  onChange={(event) => updatePlanMode.mutate(event.target.checked)}
-                  type="checkbox"
-                />
-                计划模式
-              </label>
-              <details
-                className="chat-skill-dropdown"
-                onBlur={(event) => {
-                  if (focusLeftElement(event)) setSkillDropdownOpen(false);
-                }}
-                onToggle={(event) => setSkillDropdownOpen(event.currentTarget.open)}
-                open={skillDropdownOpen}
-                ref={skillDropdownRef}
-              >
-                <summary>技能列表</summary>
-                <div className="chat-skill-list">
-                  {desiredSkills.map((skill) => (
-                    <span className="chat-skill-chip active" key={`desired-${skill}`}>{skill}</span>
-                  ))}
-                  {skillEntries.map((entry) => (
-                    <span className="chat-skill-chip" key={skillLabel(entry)}>{skillLabel(entry)}</span>
-                  ))}
-                  {agentId && selectedAgentSkills.isSuccess && desiredSkills.length === 0 && skillEntries.length === 0 && (
-                    <span className="muted">暂无技能</span>
-                  )}
-                  {!agentId && <span className="muted">未选择智能体</span>}
-                </div>
-              </details>
-              <button className="chat-create-submit" disabled={!agentId || selectedChatAgentUnavailable || send.isPending} type="submit">
-                发送
-              </button>
-            </div>
-            <ChatIssueCreationHelp />
+              )}
+              locked
+              planMode={{
+                checked: Boolean(chat.data?.planMode),
+                disabled: updatePlanMode.isPending,
+                onChange: (checked) => updatePlanMode.mutate(checked),
+              }}
+              projectControl={(
+                <select aria-label="项目" disabled value={projectContext?.entityId ?? ""}>
+                  <option value={projectContext?.entityId ?? ""}>
+                    {projectContext?.entity?.label ?? (projectContext ? projectContext.entityId : "未关联项目")}
+                  </option>
+                </select>
+              )}
+              skills={[
+                ...desiredSkills.map((label) => ({ active: true, label })),
+                ...skillEntries.map((entry) => ({ label: skillLabel(entry) })),
+              ]}
+              skillsEmptyText={agentId && selectedAgentSkills.isSuccess ? "暂无技能" : "未选择智能体"}
+              submitDisabled={!agentId || selectedChatAgentUnavailable || send.isPending}
+              submitLabel="发送"
+            />
           </form>
           </TertiaryPageViewport>
         </TertiaryPageShell>
       )}
     </ChatsWorkspace>
-  );
-}
-
-function ChatIssueCreationHelp() {
-  return (
-    <details className="chat-context-help">
-      <summary>任务创建规则</summary>
-      <div>
-        <p>计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。</p>
-        <p>任务创建模式由对话设置决定；智能体只提交任务建议，不能在回复里自行切换自动创建。</p>
-      </div>
-    </details>
   );
 }
 

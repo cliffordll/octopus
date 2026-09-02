@@ -218,6 +218,76 @@ async def test_request_revision_writes_activity(session: AsyncSession) -> None:
     assert [row.action for row in rows] == ["approval.revision_requested"]
 
 
+@pytest.mark.parametrize(
+    ("method_name", "expected_status"),
+    [
+        ("approve_approval", "approved"),
+        ("reject_approval", "rejected"),
+        ("request_revision", "revision_requested"),
+    ],
+)
+async def test_decision_notifies_requesting_agent(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+    expected_status: str,
+) -> None:
+    org = await _seed_org(session)
+    approval = await _seed_approval(
+        session, org.id, requested_by_agent_id="requesting-agent"
+    )
+    wakeups: list[tuple[str, dict[str, object], dict[str, object]]] = []
+
+    async def fake_wakeup(
+        _service: object,
+        agent_id: str,
+        payload: dict[str, object],
+        **kwargs: object,
+    ) -> None:
+        wakeups.append((agent_id, payload, kwargs))
+
+    monkeypatch.setattr(
+        "server.services.heartbeat.HeartbeatService.wakeup", fake_wakeup
+    )
+    service = ApprovalService(session)
+
+    async with async_transaction(session):
+        updated = await getattr(service, method_name)(
+            approval.id,
+            {"decisionNote": f"note for {expected_status}"},
+            actor_type="user",
+            actor_id="board-1",
+        )
+
+    assert updated is not None
+    assert updated["status"] == expected_status
+    assert len(wakeups) == 1
+    target_agent_id, wakeup_payload, wakeup_kwargs = wakeups[0]
+    assert target_agent_id == "requesting-agent"
+    assert wakeup_payload["reason"] == "approval_decided"
+    assert wakeup_payload["payload"] == {
+        "approvalId": approval.id,
+        "approvalStatus": expected_status,
+        "approvalType": "hire_agent",
+        "decisionNote": f"note for {expected_status}",
+    }
+    assert wakeup_kwargs["execute_immediately"] is False
+
+    activity = (
+        await session.execute(
+            select(ActivityLog).where(ActivityLog.entity_id == approval.id)
+        )
+    ).scalar_one()
+    assert activity.agent_id == "requesting-agent"
+    assert activity.details is not None
+    assert activity.details["notification"] == {
+        "recipientType": "agent",
+        "recipientId": "requesting-agent",
+        "status": expected_status,
+        "decisionNote": f"note for {expected_status}",
+    }
+
+
 async def test_resubmit_approval_writes_activity(session: AsyncSession) -> None:
     org = await _seed_org(session)
     approval = await _seed_approval(

@@ -76,14 +76,17 @@ it("shows a composer and sends a first message through a selected agent", async 
   expect(screen.queryByText("对话智能体")).not.toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "消息导航" })).queryByRole("combobox")).not.toBeInTheDocument();
   expect(screen.getByLabelText("项目")).toBeInTheDocument();
+  expect(screen.getByLabelText("对话上下文设置")).toContainElement(screen.getByLabelText("项目"));
   expect(screen.getByLabelText("任务创建模式")).toHaveValue("manual_approval");
   expect(screen.getByLabelText("计划模式")).not.toBeChecked();
-  expect(screen.getByText("任务创建规则")).toBeInTheDocument();
+  expect(screen.getByLabelText("任务创建规则")).toBeInTheDocument();
   expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).not.toBeVisible();
   expect(screen.getByText("任务创建模式由对话设置决定；智能体只提交任务建议，不能在回复里自行切换自动创建。")).not.toBeVisible();
-  await userEvent.click(screen.getByText("任务创建规则"));
+  await userEvent.click(screen.getByLabelText("任务创建规则"));
   expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).toBeVisible();
   expect(screen.getByText("任务创建模式由对话设置决定；智能体只提交任务建议，不能在回复里自行切换自动创建。")).toBeVisible();
+  await userEvent.click(screen.getByLabelText("消息输入"));
+  expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).not.toBeVisible();
   expect(screen.getByRole("button", { name: "发送并创建对话" })).toBeInTheDocument();
 
   expect(await screen.findByRole("option", { name: "平台项目" })).toBeInTheDocument();
@@ -91,7 +94,7 @@ it("shows a composer and sends a first message through a selected agent", async 
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.selectOptions(screen.getByLabelText("任务创建模式"), "auto_create");
   await userEvent.click(screen.getByLabelText("计划模式"));
-  const skillSummary = screen.getByText("技能列表");
+  const skillSummary = screen.getByLabelText(/技能列表/);
   const skillDropdown = skillSummary.closest("details");
   await userEvent.click(skillSummary);
   expect(skillDropdown).toHaveAttribute("open");
@@ -544,7 +547,7 @@ it("shows the selected conversation and agent identity while sending messages", 
   expect(screen.getByLabelText("对话智能体")).toHaveValue("agent-1");
   expect(screen.getByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
   expect(screen.queryByText("对话智能体")).not.toBeInTheDocument();
-  expect(screen.getByLabelText("对话智能体").closest(".chat-context-controls")).toContainElement(
+  expect(screen.getByLabelText("对话智能体").closest(".chat-context-bar")).toContainElement(
     screen.getByRole("button", { name: "发送" }),
   );
   const reply = screen.getByText("已有回复").closest("article");
@@ -617,12 +620,15 @@ it("shows existing conversation context as readonly controls with a skill dropdo
   expect(screen.getByLabelText("任务创建模式")).toBeDisabled();
   expect(screen.getByLabelText("任务创建模式")).toHaveTextContent("自动创建");
   expect(screen.getByLabelText("计划模式")).toBeChecked();
-  expect(screen.getByText("任务创建规则")).toBeInTheDocument();
+  expect(screen.getByLabelText("当前对话上下文")).toContainElement(screen.getByLabelText("项目"));
+  expect(screen.getAllByRole("img", { name: /已锁定/ })).toHaveLength(3);
+  expect(screen.queryByText("只读")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("任务创建规则")).toBeInTheDocument();
   expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).not.toBeVisible();
-  await userEvent.click(screen.getByText("任务创建规则"));
+  await userEvent.click(screen.getByLabelText("任务创建规则"));
   expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).toBeVisible();
   expect(screen.queryByRole("option", { name: "Reviewer (评审)" })).not.toBeInTheDocument();
-  const skillSummary = screen.getByText("技能列表");
+  const skillSummary = screen.getByLabelText(/技能列表/);
   const skillDropdown = skillSummary.closest("details");
   await userEvent.click(skillSummary);
   expect(skillDropdown).toHaveAttribute("open");
