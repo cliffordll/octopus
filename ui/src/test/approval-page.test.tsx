@@ -24,7 +24,8 @@ it("shows an approval and submits a board decision", async () => {
     updatedAt: "",
   };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
-    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/projects") return respond([]);
+    if (path === "/api/orgs/org-1/members") return respond([]);
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
     if (path === "/api/approvals/approval-1/issues" && init?.method === "GET") return respond([]);
@@ -44,11 +45,13 @@ it("shows an approval and submits a board decision", async () => {
 
   renderApp("/orgs/org-1/approvals/approval-1");
   expect(await screen.findByRole("heading", { level: 1, name: /budget_override_required/ })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "← 审批列表" })).toHaveAttribute("href", "/orgs/org-1/approvals");
   const messageNavigation = screen.getByRole("navigation", { name: "消息导航" });
   expect(within(messageNavigation).getByRole("link", { name: "审批管理" })).toHaveClass("active");
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   expect(screen.getByText(/"amount": 1000/)).toBeInTheDocument();
-  expect(screen.getByText("评论不会改变审批状态；如需处理审批，请使用右侧同意、拒绝或请求修改。")).toBeInTheDocument();
+  expect(screen.getByText("评论只记录沟通内容，不改变审批状态。")).toBeInTheDocument();
+  expect(screen.getByText("完整请求 JSON").closest("details")).not.toHaveAttribute("open");
 
   await userEvent.type(screen.getByLabelText("审批评论"), "请补充风险说明");
   await userEvent.click(screen.getByRole("button", { name: "添加评论" }));
@@ -94,6 +97,8 @@ it("resubmits an approval with edited payload", async () => {
     updatedAt: "",
   };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/projects") return respond([]);
+    if (path === "/api/orgs/org-1/members") return respond([]);
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
     if (path === "/api/approvals/approval-1/issues" && init?.method === "GET") return respond([]);
@@ -118,6 +123,59 @@ it("resubmits an approval with edited payload", async () => {
       body: JSON.stringify({ payload: { action: "new" } }),
     }),
   );
+});
+
+it("uses the full-width detail layout for a resolved approval", async () => {
+  const approval = {
+    id: "b7d699c1-85cc-4b1e-adc2-d54d057e9fd9",
+    orgId: "org-1",
+    type: "chat_issue_creation",
+    status: "approved",
+    requestedByAgentId: null,
+    requestedByUserId: "user-1",
+    createdAt: "2026-08-28T05:29:00.000Z",
+    payload: {
+      proposedIssue: {
+        title: "中国三山介绍与汇总报告",
+        description: "研究并介绍中国传统所称的三山。",
+        priority: "medium",
+        projectId: "project-1",
+      },
+    },
+    decisionNote: null,
+    decidedByUserId: "board-1",
+    decidedAt: "2026-08-28T05:30:00.000Z",
+    updatedAt: "2026-08-28T05:30:00.000Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/projects") {
+      return respond([{ id: "project-1", name: "dev_shared" }]);
+    }
+    if (path === "/api/orgs/org-1/members") {
+      return respond([{ principalType: "user", principalId: "user-1", displayName: "张三" }]);
+    }
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === `/api/approvals/${approval.id}/issues` && init?.method === "GET") return respond([]);
+    if (path === `/api/approvals/${approval.id}/comments` && init?.method === "GET") return respond([]);
+    return respond(approval);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp(`/orgs/org-1/approvals/${approval.id}`);
+  const pageTitle = await screen.findByRole("heading", { level: 1, name: "中国三山介绍与汇总报告" });
+  const pageHeader = pageTitle.closest("header");
+  expect(pageHeader).not.toBeNull();
+  expect(within(pageHeader as HTMLElement).queryByText("chat_issue_creation")).not.toBeInTheDocument();
+  expect(within(pageHeader as HTMLElement).getByRole("link", { name: "← 审批列表" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "审批决策" })).not.toBeInTheDocument();
+  const proposal = screen.getByRole("heading", { name: "任务提案" });
+  expect(proposal.closest(".approval-detail-layout")).toHaveClass(
+    "approval-detail-layout-resolved",
+  );
+  expect(within(proposal.closest("article") as HTMLElement).getByText("chat_issue_creation")).toBeInTheDocument();
+  expect(screen.getByText("dev_shared")).toBeInTheDocument();
+  expect(screen.getByText("Human · 张三")).toBeInTheDocument();
 });
 
 it("shows approval management cards and resolves a pending approval", async () => {
@@ -149,6 +207,7 @@ it("shows approval management cards and resolves a pending approval", async () =
                 proposedIssue: {
                   title: "读取 README.md 并生成标题文档",
                   description: "读取 README.md 的内容。",
+                  projectId: "project-1",
                 },
               },
               decisionNote: null,
@@ -162,6 +221,12 @@ it("shows approval management cards and resolves a pending approval", async () =
     }
     if (path === "/api/orgs/org-1/approvals" && init?.method === "POST") {
       return respond({ id: "approval-2", orgId: "org-1", type: "chat_operation", status: "pending", requestedByAgentId: "agent-1", requestedByUserId: null, createdAt: "", payload: {} }, 201);
+    }
+    if (path === "/api/orgs/org-1/projects") {
+      return respond([{ id: "project-1", name: "dev_shared" }]);
+    }
+    if (path === "/api/orgs/org-1/members") {
+      return respond([{ principalType: "agent", principalId: "agent-1", displayName: "Reviewer" }]);
     }
     if (path === "/api/approvals/approval-1/reject" && init?.method === "POST") {
       return respond({ ...approvals[0], status: "rejected", payload: {}, decisionNote: null });
@@ -199,10 +264,18 @@ it("shows approval management cards and resolves a pending approval", async () =
       }),
     }),
   );
-  expect(screen.getByRole("link", { name: "打开完整审批" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "读取 README.md 并生成标题文档" })).toHaveAttribute(
     "href",
     "/orgs/org-1/approvals/approval-1",
   );
+  expect(screen.queryByRole("link", { name: "查看详情" })).not.toBeInTheDocument();
+  expect(screen.queryByText("任务标题")).not.toBeInTheDocument();
+  expect(screen.getByText("审批类型")).toBeInTheDocument();
+  expect(screen.getByText("所属项目")).toBeInTheDocument();
+  expect(screen.getByText("dev_shared")).toBeInTheDocument();
+  expect(screen.getByText("发起方")).toBeInTheDocument();
+  expect(screen.getByText("Agent · Reviewer")).toBeInTheDocument();
+  expect(screen.getByText("创建时间")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "拒绝" }));
   expect(fetchMock).toHaveBeenCalledWith(
