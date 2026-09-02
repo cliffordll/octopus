@@ -248,7 +248,7 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
   return (
     <ContextWorkspace
       contentClassName={contentClassName}
-      label="Tasks"
+      label="Issues"
       navigationLabel="任务导航"
       title="任务"
       sidebar={

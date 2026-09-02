@@ -10,6 +10,7 @@ import { AUTH_SESSION_STALE_TIME_MS } from "../auth/sessionCache";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
 import { priorityLabel, statusLabel } from "../utils/display";
 import { organizationMembersWithAgentFallback } from "../utils/organizationMembers";
 
@@ -144,58 +145,61 @@ export function IssuesPage() {
     }
   }, [projectId, shouldOpenCreate]);
   return (
-    <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header issues-page-header">
-        <div>
-          <p className="eyebrow">Issues</p>
-          <h1>{viewTitle}</h1>
-          <p className="muted">{viewDescription}</p>
-        </div>
-        {!followingOnly && (
-          <div className="org-page-actions">
-            <button
-              className="org-primary-action"
-              type="button"
-              onClick={() => {
-                setSelectedProjectId(projectId);
-                setTaskDialogOpen(true);
-              }}
-            >
-              新建任务
-            </button>
+    <IssuesWorkspace contentClassName="org-content-full tertiary-page-content" orgId={orgId}>
+      <TertiaryPageShell>
+        <TertiaryPageHeader className="issues-page-header">
+          <div>
+            <p className="eyebrow">Issues</p>
+            <h1>{viewTitle}</h1>
+            <p className="muted">{viewDescription}</p>
           </div>
-        )}
-      </header>
-      {agents.error && <ErrorNotice error={agents.error} />}
-      {hierarchy.error && <ErrorNotice error={hierarchy.error} />}
-      {projects.error && <ErrorNotice error={projects.error} />}
-      {issues.error && <ErrorNotice error={issues.error} />}
-      {create.error && <ErrorNotice error={create.error} />}
-      <section className="issue-table issue-status-board issues-list-surface">
-        {issues.isLoading && <p className="muted">载入中...</p>}
-        {!followingOnly && (
-          <IssueStatusBoard
-            agents={agentList}
-            emptyMessage={issues.isSuccess ? emptyMessage : null}
-            issues={issueList}
-            layout="list"
-            members={assignableMembers}
-            orgId={orgId}
-            projects={projectList}
-            showAssignee={!mineOnly}
-            showProject={!projectId}
-          />
-        )}
-        {followingOnly && <p className="issues-view-empty muted">{emptyMessage}</p>}
-      </section>
-      {taskDialogOpen && (
-        <div
-          className="modal-backdrop"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeTaskDialog();
-          }}
-          role="presentation"
-        >
+          {!followingOnly && (
+            <div className="org-page-actions">
+              <button
+                className="org-primary-action"
+                type="button"
+                onClick={() => {
+                  setSelectedProjectId(projectId);
+                  setTaskDialogOpen(true);
+                }}
+              >
+                新建任务
+              </button>
+            </div>
+          )}
+        </TertiaryPageHeader>
+        <TertiaryPageViewport className="issues-page-viewport">
+          {agents.error && <ErrorNotice error={agents.error} />}
+          {hierarchy.error && <ErrorNotice error={hierarchy.error} />}
+          {projects.error && <ErrorNotice error={projects.error} />}
+          {issues.error && <ErrorNotice error={issues.error} />}
+          {create.error && <ErrorNotice error={create.error} />}
+          <section className="issue-table issue-status-board issues-list-surface">
+            {issues.isLoading && <p className="muted">载入中...</p>}
+            {!followingOnly && (
+              <IssueStatusBoard
+                agents={agentList}
+                emptyMessage={issues.isSuccess ? emptyMessage : null}
+                issues={issueList}
+                layout="list"
+                members={assignableMembers}
+                orgId={orgId}
+                projects={projectList}
+                showAssignee={!mineOnly}
+                showProject={!projectId}
+              />
+            )}
+            {followingOnly && <p className="issues-view-empty muted">{emptyMessage}</p>}
+          </section>
+        </TertiaryPageViewport>
+        {taskDialogOpen && (
+          <div
+            className="modal-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeTaskDialog();
+            }}
+            role="presentation"
+          >
           <section aria-labelledby="new-task-title" aria-modal="true" className="panel task-modal task-create-modal" role="dialog">
             <div className="task-modal-header">
               <div>
@@ -304,8 +308,9 @@ export function IssuesPage() {
               </div>
             </form>
           </section>
-        </div>
-      )}
+          </div>
+        )}
+      </TertiaryPageShell>
     </IssuesWorkspace>
   );
 }

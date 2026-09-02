@@ -4,6 +4,7 @@ import { messengerApi } from "../api/messenger";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { statusLabel } from "../utils/display";
 
 const SYSTEM_THREADS = [
@@ -27,13 +28,13 @@ export function MessengerPage() {
 
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
+      <TertiaryPageHeader>
         <div>
           <p className="eyebrow">Messenger</p>
           <h1>消息中心</h1>
           <p className="muted">查看对话消息、任务动态、审批和系统提醒。</p>
         </div>
-      </header>
+      </TertiaryPageHeader>
       <section className="panel">
         <h2>线程</h2>
         {threads.error && <ErrorNotice error={threads.error} />}

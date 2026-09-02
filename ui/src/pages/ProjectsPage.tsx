@@ -4,6 +4,7 @@ import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-
 import { projectsApi } from "../api/projects";
 import type { ProjectStatus } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
@@ -77,13 +78,13 @@ export function ProjectsPage() {
       {projects.isSuccess && projects.data.length > 0 && !shouldOpenCreate && (
         <Navigate replace to={`/orgs/${orgId}/projects/${projects.data[0]!.id}`} />
       )}
-      <header className="page-header">
+      <TertiaryPageHeader>
         <div>
           <p className="eyebrow">Projects</p>
           <h1>项目</h1>
           <p className="muted">当前组织下的项目。</p>
         </div>
-      </header>
+      </TertiaryPageHeader>
       {projects.error && <ErrorNotice error={projects.error} />}
       {projects.isSuccess && projects.data.length === 0 && (
         <section className="panel project-empty-state">

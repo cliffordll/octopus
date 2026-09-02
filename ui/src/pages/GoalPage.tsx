@@ -10,6 +10,7 @@ import type { ActivityEvent, Goal, GoalLevel, GoalStatus, IssueListItem, Project
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { GoalTree } from "../components/GoalTree";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { formatDateTime, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
@@ -160,7 +161,7 @@ export function GoalPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
+      <TertiaryPageHeader>
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/goals`}>返回 Goals</Link>
           <div className="agent-title-row">
@@ -174,7 +175,7 @@ export function GoalPage() {
             <button className="danger" disabled={remove.isPending || (dependencies.data?.blockers.length ?? 0) > 0} onClick={() => remove.mutate()} type="button">删除</button>
           </div>
         )}
-      </header>
+      </TertiaryPageHeader>
       {goal.data && (
         <>
           <div className="goal-summary-grid">

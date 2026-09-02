@@ -8,6 +8,7 @@ import { projectsApi } from "../api/projects";
 import type { ChatMessage } from "../api/types";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { roleLabel } from "../utils/display";
 
 function skillLabel(entry: Record<string, unknown>) {
@@ -123,13 +124,13 @@ export function ChatsPage() {
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <section className="chat-panel">
-        <header className="page-header">
+        <TertiaryPageHeader>
           <div>
             <p className="eyebrow">New chat</p>
             <h1>新对话</h1>
             <p className="muted">选择智能体并发送第一条消息。</p>
           </div>
-        </header>
+        </TertiaryPageHeader>
         <div className="chat-empty-state">
           <h2>你想让智能体处理什么？</h2>
         </div>

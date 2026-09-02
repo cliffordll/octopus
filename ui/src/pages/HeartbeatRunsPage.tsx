@@ -5,7 +5,9 @@ import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import type { Agent, HeartbeatRun } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { StatusPill } from "../components/StatusPill";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { roleLabel, statusLabel } from "../utils/display";
 import { runDescriptor, runIssueLabel, runPurposeLabel, runStatusLabel, runTerminalReasonLabel } from "../utils/runDisplay";
 import { OrgWorkspace } from "./OrganizationPage";
@@ -184,14 +186,14 @@ export function HeartbeatRunsPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header heartbeat-page-header">
+      <TertiaryPageHeader className="heartbeat-page-header">
         <div>
           <p className="eyebrow">Heartbeat Monitor</p>
           <h1>心跳</h1>
           <p className="muted">这里汇总智能体状态检测、运行记录和手动诊断。状态检测默认每 300s 执行一次，不等于执行任务。</p>
         </div>
         <Link className="button org-primary-action" to={`/orgs/${orgId}/run-intelligence`}>运行分析</Link>
-      </header>
+      </TertiaryPageHeader>
       {agents.error && <ErrorNotice error={agents.error} />}
       {runs.error && <ErrorNotice error={runs.error} />}
       {setHeartbeatEnabled.error && <ErrorNotice error={setHeartbeatEnabled.error} />}
@@ -237,26 +239,13 @@ export function HeartbeatRunsPage() {
                       <p title={summary || undefined}>{summary || "暂无运行摘要"}</p>
                     </div>
                     <div className="heartbeat-row-actions">
-                      <div className="heartbeat-toggle-actions" role="group" aria-label={`${agent.name} 心跳开关`}>
-                        <button
-                          aria-pressed={toggleOn}
-                          className={toggleOn ? "active" : ""}
-                          disabled={saving}
-                          onClick={() => !toggleOn && setHeartbeatEnabled.mutate({ agent, enabled: true })}
-                          type="button"
-                        >
-                          启用
-                        </button>
-                        <button
-                          aria-pressed={!toggleOn}
-                          className={!toggleOn ? "active" : ""}
-                          disabled={saving}
-                          onClick={() => toggleOn && setHeartbeatEnabled.mutate({ agent, enabled: false })}
-                          type="button"
-                        >
-                          关闭
-                        </button>
-                      </div>
+                      <SegmentedControl
+                        ariaLabel={`${agent.name} 心跳开关`}
+                        disabled={saving}
+                        onChange={(value) => setHeartbeatEnabled.mutate({ agent, enabled: value === "enabled" })}
+                        options={[{ label: "启用", value: "enabled" }, { label: "关闭", value: "disabled" }]}
+                        value={toggleOn ? "enabled" : "disabled"}
+                      />
                       <div className="heartbeat-interval-actions">
                         <label className="heartbeat-interval-control">
                           <span>间隔（秒）</span>

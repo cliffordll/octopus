@@ -263,6 +263,8 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
   renderApp("/orgs/org-1/issues");
 
   const taskNavigation = screen.getByRole("navigation", { name: "任务导航" });
+  const taskSidebar = taskNavigation.closest("aside")!;
+  expect(within(taskSidebar).getByText("Issues")).toHaveClass("org-sidebar-label");
   expect(within(taskNavigation).queryByRole("heading", { name: "任务" })).not.toBeInTheDocument();
   expect(within(taskNavigation).getByRole("heading", { name: "任务视图" })).toBeInTheDocument();
   expect(screen.getAllByRole("heading", { name: "任务", level: 2 })).toHaveLength(1);

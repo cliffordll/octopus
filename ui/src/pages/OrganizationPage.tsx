@@ -12,6 +12,7 @@ import { FileBrowser } from "../components/FileBrowser";
 import { MemberAccessSettings } from "../components/MemberAccessSettings";
 import { OrganizationCostPanel } from "../components/OrganizationCostPanel";
 import { SidebarIcon } from "../components/SidebarIcon";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { sourceLabel } from "../utils/display";
 
 export function OrganizationPage() {
@@ -65,12 +66,12 @@ export function OrganizationPage() {
   if (organization.error) return <ErrorNotice error={organization.error} />;
   return (
     <div className="org-content organization-settings">
-      <header className="page-header">
+      <TertiaryPageHeader>
         <div>
           <p className="eyebrow">Organization Settings</p>
           <h1>组织设置</h1>
         </div>
-      </header>
+      </TertiaryPageHeader>
       <form className="panel form narrow" onSubmit={submit}>
           <label>
             组织名称
@@ -134,13 +135,13 @@ export function OrganizationCostsPage() {
   const { orgId = "" } = useParams();
   return (
     <OrgWorkspace contentClassName="org-content-full organization-fullscreen-detail organization-costs-content" orgId={orgId}>
-      <header className="page-header">
+      <TertiaryPageHeader>
         <div>
           <p className="eyebrow">Organization Costs</p>
           <h1>成本</h1>
           <p className="muted">按智能体、服务商、计费方和项目查看运行成本。</p>
         </div>
-      </header>
+      </TertiaryPageHeader>
       <OrganizationCostPanel orgId={orgId} />
     </OrgWorkspace>
   );
@@ -374,7 +375,7 @@ export function OrganizationStructurePage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full organization-structure-content" orgId={orgId}>
-      <header className="page-header organization-structure-header">
+      <TertiaryPageHeader className="organization-structure-header">
         <div>
           <p className="eyebrow">Organization</p>
           <h1>组织架构</h1>
@@ -397,7 +398,7 @@ export function OrganizationStructurePage() {
             <button className="secondary small-button" type="button" onClick={fitChart}>Fit</button>
           </div>
         )}
-      </header>
+      </TertiaryPageHeader>
       {hierarchy.error && <ErrorNotice error={hierarchy.error} />}
       {hierarchy.isSuccess && memberList.length === 0 ? (
         <section className="panel organization-empty-state">
@@ -611,7 +612,7 @@ export function OrganizationResourcesPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header resources-page-header">
+      <TertiaryPageHeader className="resources-page-header">
         <div>
           <p className="eyebrow">Resources</p>
           <h1>资源</h1>
@@ -623,7 +624,7 @@ export function OrganizationResourcesPage() {
           <button className="org-primary-action" type="button" onClick={openCreateResourceDialog}>添加资源</button>
           <Link className="button secondary small-button" to={`/orgs/${orgId}/workspaces`}>浏览工作区</Link>
         </div>
-      </header>
+      </TertiaryPageHeader>
       {resources.error && <ErrorNotice error={resources.error} />}
       <section className="panel org-resource-catalog-card" aria-label="资源列表">
         {resources.isSuccess && resourceRows.length === 0 ? (
@@ -1094,13 +1095,13 @@ export function OrganizationSkillsPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full organization-skills-content" orgId={orgId}>
-      <header className="page-header skills-page-header">
+      <TertiaryPageHeader className="skills-page-header">
         <div>
           <p className="eyebrow">Skills</p>
           <h1>技能</h1>
           <p className="muted">{skillRows.length} 个可用</p>
         </div>
-      </header>
+      </TertiaryPageHeader>
       {skills.error && <ErrorNotice error={skills.error} />}
       <div className="organization-skills-shell">
         <aside className="organization-skills-sidebar">
@@ -1510,14 +1511,14 @@ export function OrganizationWorkspacesPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full organization-fullscreen-detail organization-workspaces-content" orgId={orgId}>
-      <header className="page-header">
+      <TertiaryPageHeader>
         <div>
           <p className="eyebrow">Workspaces</p>
           <h1>工作区</h1>
           <p className="muted">查看组织文件、运行产物和智能体配置。</p>
         </div>
         <button className="org-primary-action" onClick={refreshWorkspace} type="button">刷新</button>
-      </header>
+      </TertiaryPageHeader>
       {projects.error && <ErrorNotice error={projects.error} />}
       {rootFiles.error && <ErrorNotice error={rootFiles.error} />}
       {selectedFile.error && <ErrorNotice error={selectedFile.error} />}

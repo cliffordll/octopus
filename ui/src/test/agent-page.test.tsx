@@ -8,7 +8,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("controls an agent from its overview and shows runtime status", async () => {
+it("opens agent configuration by default and controls the agent", async () => {
   const agent = {
     id: "agent-1",
     orgId: "org-1",
@@ -171,15 +171,6 @@ it("controls an agent from its overview and shows runtime status", async () => {
   renderApp("/orgs/org-1/agents/agent-1");
   const heading = await screen.findByRole("heading", { name: "Builder" });
   expect(heading.closest(".agent-detail-content")).not.toBeNull();
-  expect(await screen.findByRole("heading", { name: "待办任务" })).toBeInTheDocument();
-  expect(screen.getByText("Wire inbox")).toBeInTheDocument();
-  expect(screen.getByText("Please update the implementation plan before continuing.")).toBeInTheDocument();
-  const overviewSummary = screen.getByRole("group", { name: "智能体概览统计" });
-  expect(overviewSummary).toHaveTextContent(/1\s*待办/);
-  expect(overviewSummary).toHaveTextContent(/成功\s*最近运行/);
-  expect(overviewSummary).toHaveTextContent(/session-1\s*会话/);
-  expect(screen.queryByRole("heading", { name: "运行状态" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "智能体档案" })).not.toBeInTheDocument();
   const header = heading.closest("header");
   expect(header).not.toBeNull();
   expect(within(header!).getByText("空闲")).toBeInTheDocument();
@@ -198,7 +189,6 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(screen.getAllByRole("button", { name: "暂停" })).toHaveLength(1);
   const tabs = screen.getByRole("navigation", { name: "智能体详情导航" });
   expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
-    "概览",
     "配置",
     "说明",
     "记忆",
@@ -206,6 +196,8 @@ it("controls an agent from its overview and shows runtime status", async () => {
     "运行记录",
     "预算",
   ]);
+  expect(within(tabs).getByRole("link", { name: "配置" })).toHaveClass("active");
+  expect(within(tabs).queryByRole("link", { name: "概览" })).not.toBeInTheDocument();
   expect(within(tabs).getByRole("link", { name: "说明" })).toHaveAttribute(
     "href",
     "/orgs/org-1/agents/agent-1/profile",
@@ -318,9 +310,6 @@ it("controls an agent from its overview and shows runtime status", async () => {
     "/api/agents/agent-1/memory/files?layer=life&path=",
     expect.objectContaining({ method: "GET" }),
   );
-  await userEvent.click(within(tabs).getByRole("link", { name: "概览" }));
-  expect(await screen.findByText("成功")).toBeInTheDocument();
-
   await userEvent.click(screen.getByRole("button", { name: "暂停" }));
   await userEvent.click(screen.getByRole("button", { name: "立即唤醒" }));
   await userEvent.click(screen.getByRole("button", { name: "运行诊断" }));
@@ -609,6 +598,12 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   );
 
   await userEvent.click(screen.getByRole("link", { name: "预算" }));
+  const budgetOverview = await screen.findByRole("group", { name: "预算概览" });
+  expect(budgetOverview).toHaveTextContent("本月已用");
+  expect(budgetOverview).toHaveTextContent("不限预算上限");
+  expect(budgetOverview).toHaveTextContent("不限剩余额度");
+  expect(budgetOverview).toHaveTextContent("未设置使用率");
+  expect(screen.getByText("填写 0 表示不设置上限。", { exact: false })).toBeInTheDocument();
   await userEvent.clear(await screen.findByLabelText("月度预算（美元）"));
   await userEvent.type(screen.getByLabelText("月度预算（美元）"), "10");
   await userEvent.click(screen.getByRole("button", { name: "保存预算" }));
@@ -621,11 +616,11 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   );
 
   await userEvent.click(screen.getByRole("link", { name: "运行记录" }));
-  const queueRegion = await screen.findByRole("region", { name: "活跃队列" });
-  expect(queueRegion).toHaveTextContent("3 个活跃运行");
-  expect(within(queueRegion).getByText("心跳")).toBeInTheDocument();
-  expect(within(queueRegion).getByText("任务分配")).toBeInTheDocument();
-  expect(within(queueRegion).getByRole("link", { name: "OCT-1" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
+  const runFilters = await screen.findByRole("group", { name: "运行筛选" });
+  expect(runFilters).toHaveTextContent("运行中");
+  expect(runFilters).toHaveTextContent("排队中");
+  expect(runFilters).toHaveTextContent("失败");
+  expect(runFilters).toHaveTextContent(/3\s*并发上限/);
   const detail = screen.getByTestId("agent-runs-detail-pane");
   expect((await within(detail).findAllByText("失败")).length).toBeGreaterThanOrEqual(1);
   expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
@@ -641,6 +636,11 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(detail).getByText("npm test")).toBeInTheDocument();
   expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
   const rail = screen.getByTestId("agent-runs-list-pane");
+  expect(within(rail).getByRole("group", { name: "运行筛选" })).toBe(runFilters);
+  expect(within(runFilters).getByRole("button", { name: "全部" })).toHaveClass("active");
+  await userEvent.click(within(runFilters).getByRole("button", { name: "运行中" }));
+  expect(within(runFilters).getByRole("button", { name: "运行中" })).toHaveClass("active");
+  await userEvent.click(within(runFilters).getByRole("button", { name: "全部" }));
   expect(within(rail).getAllByText("手动触发").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getAllByText("心跳").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getAllByText("任务分配").length).toBeGreaterThanOrEqual(1);
@@ -1173,7 +1173,15 @@ it("loads configuration history on demand, rolls back, and resets runtime sessio
       return respond([{ id: "session-row-1", agentId: "agent-1", taskKey: "issue-1", sessionDisplayId: "session-1", status: "active", createdAt: "", updatedAt: "2026-05-28T09:00:00Z" }]);
     }
     if (path === "/api/agents/agent-1/config-revisions" && init?.method === "GET") {
-      return respond([{ id: "revision-1", agentId: "agent-1", createdAt: "2026-05-28T00:00:00Z", runtimeConfig: {} }]);
+      return respond([{
+        id: "revision-1",
+        agentId: "agent-1",
+        changedKeys: ["agentRuntimeType", "runtimeConfig"],
+        createdAt: "2026-05-28T00:00:00Z",
+        createdByUserId: "user-12345678",
+        runtimeConfig: {},
+        source: "patch",
+      }]);
     }
     return respond({ id: "agent-1" });
   });
@@ -1201,7 +1209,10 @@ it("loads configuration history on demand, rolls back, and resets runtime sessio
   expect(configHistory).not.toBeNull();
   expect(configurationLayout).not.toContainElement(configHistory);
   await userEvent.click(screen.getByRole("heading", { name: "配置历史" }));
-  expect(await screen.findByText("revision-1")).toBeInTheDocument();
+  expect(await within(configHistory as HTMLElement).findByText("版本 revision")).toBeInTheDocument();
+  expect(within(configHistory as HTMLElement).getByText("运行时")).toBeInTheDocument();
+  expect(within(configHistory as HTMLElement).getByText("运行策略")).toBeInTheDocument();
+  expect(within(configHistory as HTMLElement).getByText(/用户修改/)).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "回滚" }));
   await userEvent.click(screen.getByRole("button", { name: "重置会话" }));
   const resetDialog = screen.getByRole("dialog", { name: "重置会话" });
@@ -1247,13 +1258,17 @@ it("shows an empty skill list without placeholder skills", async () => {
 
   renderApp("/orgs/org-1/agents/agent-1/skills");
 
-  expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
-  expect(await screen.findByRole("heading", { name: "使用分析" })).toBeInTheDocument();
+  expect(await screen.findByRole("group", { name: "技能统计" })).toBeInTheDocument();
+  const emptySkillStats = screen.getByRole("group", { name: "技能统计" });
+  expect(emptySkillStats).toHaveTextContent(/0\s*总数/);
+  expect(emptySkillStats).toHaveTextContent(/0\s*已启用/);
+  expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
-  expect(screen.getByText("内置技能")).toBeInTheDocument();
-  expect(screen.getByText("组织技能")).toBeInTheDocument();
-  expect(screen.getByText("智能体私有技能")).toBeInTheDocument();
-  expect(screen.getByText("外部发现")).toBeInTheDocument();
+  expect(screen.getByText("暂无技能。")).toBeInTheDocument();
+  expect(screen.queryByText("内置技能")).not.toBeInTheDocument();
+  expect(screen.queryByText("组织技能")).not.toBeInTheDocument();
+  expect(screen.queryByText("智能体私有技能")).not.toBeInTheDocument();
+  expect(screen.queryByText("外部发现")).not.toBeInTheDocument();
   expect(screen.queryByText("社区技能")).not.toBeInTheDocument();
   expect(screen.queryByText("Review")).not.toBeInTheDocument();
   expect(screen.queryByText("Debug")).not.toBeInTheDocument();
@@ -1406,50 +1421,48 @@ it("manages skills from the agent skills page", async () => {
   expect(screen.queryByRole("button", { name: "测试环境" })).not.toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("link", { name: "技能" }));
-  expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
-  expect(await screen.findByText("使用分析")).toBeInTheDocument();
+  expect(await screen.findByRole("group", { name: "技能统计" })).toBeInTheDocument();
+  const skillStats = screen.getByRole("group", { name: "技能统计" });
+  expect(skillStats).toHaveTextContent(/6\s*总数/);
+  expect(skillStats).toHaveTextContent(/2\s*已启用/);
+  expect(skillStats).toHaveTextContent(/4\s*未启用/);
+  expect(screen.queryByRole("tablist", { name: "技能来源" })).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "组织技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "智能体私有技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "外部发现" })).toBeInTheDocument();
-  expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-  expect(await screen.findByText("Review")).toBeInTheDocument();
-  expect(await screen.findByText("deep-research")).toBeInTheDocument();
-  expect(await screen.findByText("Research deeply.")).toBeInTheDocument();
-  expect(await screen.findByText("debug missing from managed home")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "组织技能" })).not.toBeInTheDocument();
+  const skillDetail = screen.getByRole("region", { name: "技能详情" });
+  expect(await within(skillDetail).findByText("Review")).toBeInTheDocument();
+  expect(await within(skillDetail).findByText("deep-research")).toBeInTheDocument();
   expect(screen.queryByText(/skillsRootPath does not exist/)).not.toBeInTheDocument();
   expect(await screen.findByText("installed")).toBeInTheDocument();
-  expect((await screen.findAllByText("外部")).length).toBeGreaterThanOrEqual(1);
-  expect(await screen.findByText("missing")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Hide" })).not.toBeInTheDocument();
-  expect(document.querySelector(".agent-skill-detail-card")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByText("Review"));
-  expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  const communityGroup = screen.getByRole("heading", { name: "社区技能" }).closest("section");
-  expect(communityGroup).not.toBeNull();
-  expect(within(communityGroup!).getByText("Deep Research")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "外部发现" })).toBeInTheDocument();
+  const reviewSkill = within(skillDetail).getByText("Review").closest("article");
+  expect(reviewSkill).not.toBeNull();
+  await userEvent.click(within(reviewSkill!).getByRole("button", { name: /Review/ }));
+  expect(within(reviewSkill!).getByText("Review carefully.")).toBeInTheDocument();
+  expect(within(skillDetail).getAllByText("Deep Research").length).toBeGreaterThanOrEqual(1);
   expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
   expect(screen.getByText("自动启用")).toBeInTheDocument();
-  const externalGroup = screen.getByRole("heading", { name: "外部发现" }).closest("section");
-  expect(externalGroup).not.toBeNull();
-  const externalConflictDescription = within(externalGroup!).getByText("Runtime already has a same-name skill.");
+  expect(await within(skillDetail).findByText("debug missing from managed home")).toBeInTheDocument();
+  const externalConflictDescription = within(skillDetail).getByText("Runtime already has a same-name skill.");
   const externalConflictSkill = externalConflictDescription.closest("article");
   expect(externalConflictSkill).not.toBeNull();
   expect(within(externalConflictSkill!).getByText("Deep Research")).toBeInTheDocument();
-  await userEvent.click(screen.getByText("Deploy"));
-  expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
-  await userEvent.click(within(screen.getByText("Deploy").closest("article")!).getByRole("switch", { name: /Deploy 技能已启用/ }));
-  await userEvent.click(screen.getByText("deep-research"));
-  const orgSkill = screen.getByText("deep-research").closest("article");
+  const deploySkill = within(skillDetail).getByText("Deploy").closest("article");
+  expect(deploySkill).not.toBeNull();
+  await userEvent.click(within(deploySkill!).getByRole("button", { name: /Deploy/ }));
+  expect(within(deploySkill!).getAllByText("Deploy safely from frontmatter").length).toBeGreaterThanOrEqual(1);
+  await userEvent.click(within(deploySkill!).getByRole("switch", { name: /Deploy 技能已启用/ }));
+  const orgSkill = within(skillDetail).getByText("deep-research").closest("article");
   expect(orgSkill).not.toBeNull();
   await userEvent.click(within(orgSkill!).getByRole("switch", { name: /deep-research 技能未启用/ }));
-  await userEvent.click(screen.getByText("Debug"));
-  const debugSkill = screen.getByText("Debug").closest("article");
+  const debugSkill = within(skillDetail).getByText("Debug").closest("article");
   expect(debugSkill).not.toBeNull();
+  expect(within(debugSkill!).getByText("missing")).toBeInTheDocument();
+  expect(within(debugSkill!).getByText("外部")).toBeInTheDocument();
   await userEvent.click(within(debugSkill!).getByRole("switch", { name: /Debug 技能未启用/ }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");

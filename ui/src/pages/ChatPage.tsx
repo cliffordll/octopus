@@ -8,6 +8,7 @@ import type { ChatConversation, ChatMessage } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { formatBytes, roleLabel, statusLabel } from "../utils/display";
 
 interface ChatRouteState {
@@ -461,7 +462,7 @@ export function ChatPage() {
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       {chat.data && (
         <section className="chat-thread-shell">
-          <header className="chat-thread-header">
+          <TertiaryPageHeader className="chat-thread-header">
             <div>
               <h1>{chat.data.title}</h1>
               <p>{boundChatAgentName ? `使用 ${boundChatAgentName}` : "选择智能体后发送消息"}</p>
@@ -471,7 +472,7 @@ export function ChatPage() {
               {chat.data.isPinned && <Badge>已置顶</Badge>}
               {chat.data.unreadCount ? <Badge>{chat.data.unreadCount} 未读</Badge> : null}
             </div>
-          </header>
+          </TertiaryPageHeader>
           {linkedIssues.length > 0 && (
             <div aria-label="关联任务" className="chat-linked-issues-strip">
               {linkedIssues.map((issue) => (

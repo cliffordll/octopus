@@ -6,6 +6,7 @@ import { goalsApi } from "../api/goals";
 import type { GoalLevel, GoalStatus } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { GoalTree } from "../components/GoalTree";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
@@ -58,14 +59,14 @@ export function GoalsPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header goals-page-header">
+      <TertiaryPageHeader className="goals-page-header">
         <div>
           <p className="eyebrow">Goals</p>
           <h1>目标</h1>
           <p className="muted">维护组织、团队、智能体和任务层级的目标，并跟踪它们之间的父子关系。</p>
         </div>
         <button className="org-primary-action" type="button" onClick={() => setDialogOpen(true)}>创建目标</button>
-      </header>
+      </TertiaryPageHeader>
       <section className="panel org-goal-list-card">
         <div className="org-section-header">
           <div>

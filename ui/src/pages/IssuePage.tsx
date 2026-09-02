@@ -66,6 +66,7 @@ import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 import { StatusPill } from "../components/StatusPill";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
 
@@ -4817,7 +4818,7 @@ export function IssuePage() {
 
         <div className="issue-detail-layout">
 
-          <header className="issue-detail-top">
+          <TertiaryPageHeader className="issue-detail-top">
 
             <nav aria-label="任务导航" className="issue-breadcrumb">
 
@@ -4982,7 +4983,7 @@ export function IssuePage() {
 
             {passiveFollowup.error && <ErrorNotice error={passiveFollowup.error} />}
 
-          </header>
+          </TertiaryPageHeader>
 
           <main className="issue-detail-main">
 
@@ -5676,7 +5677,7 @@ export function IssuePage() {
 
       {!issue.data && (
 
-        <header className="page-header">
+        <TertiaryPageHeader>
 
           <div>
 
@@ -5686,7 +5687,7 @@ export function IssuePage() {
 
           </div>
 
-        </header>
+        </TertiaryPageHeader>
 
       )}
 

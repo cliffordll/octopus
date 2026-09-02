@@ -1128,6 +1128,7 @@ export interface Agent {
   agentRuntimeConfig: Record<string, unknown>;
   runtimeConfig?: Record<string, unknown>;
   budgetMonthlyCents: number;
+  spentMonthlyCents?: number;
   lastHeartbeatAt: string | null;
   reportsTo?: string | null;
 }

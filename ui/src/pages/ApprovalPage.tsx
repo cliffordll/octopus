@@ -5,6 +5,7 @@ import { approvalsApi } from "../api/approvals";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { formatDateTime, statusLabel } from "../utils/display";
 
 function formatPayload(value: unknown): string {
@@ -84,14 +85,14 @@ export function ApprovalPage() {
   const currentPayload = approval.data ? formatPayload(approval.data.payload) : "{}";
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
+      <TertiaryPageHeader>
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/approvals`}>返回审批管理</Link>
           <p className="eyebrow">Approval</p>
           <h1>{approval.data?.type ?? "载入中..."}</h1>
           <p className="muted">在消息上下文中查看完整请求并做出决策。</p>
         </div>
-      </header>
+      </TertiaryPageHeader>
       {approval.data && (
         <section className="approval-detail-layout">
           <article className="panel approval-detail">

@@ -19,6 +19,7 @@ import type {
   WorkspaceFileTreeNode,
 } from "../api/types";
 import { Badge } from "../components/Badge";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
 import { ProjectWorkspaceExplorer } from "../components/ProjectWorkspaceExplorer";
@@ -862,10 +863,10 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
   );
   if (project.error) return <ErrorNotice error={project.error} />;
   return (
-    <OrgWorkspace contentClassName={`org-content-full${activeTab === "workspace" ? " project-workspace-content" : ""}`} orgId={orgId}>
-      <div className="project-detail-shell">
-      <header className="page-header project-detail-header">
-        <div className="project-header-identity">
+    <OrgWorkspace contentClassName={`org-content-full tertiary-page-content${activeTab === "workspace" ? " project-workspace-content" : ""}`} orgId={orgId}>
+      <TertiaryPageShell className="project-detail-shell">
+      <TertiaryPageHeader className="project-detail-header">
+        <div className="tertiary-page-identity project-header-identity">
           <span className="project-avatar-lg" style={{ background: project.data?.color ?? "#6366f1" }}>
             {(project.data?.name ?? "P").slice(0, 1).toUpperCase()}
           </span>
@@ -882,12 +883,12 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
           </div>
         </div>
         {project.data && (
-          <div className="project-header-actions">
+          <div className="tertiary-page-actions project-header-actions">
             <Link className="button secondary" to={`/orgs/${orgId}/chats`}>聊天</Link>
             <button className="danger" disabled={removeProject.isPending} onClick={() => removeProject.mutate()} type="button">删除项目</button>
           </div>
         )}
-      </header>
+      </TertiaryPageHeader>
       {project.data && (
         <>
           {project.data.pauseReason === "budget" && (
@@ -903,6 +904,9 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</NavLink>
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/budget`}>预算</NavLink>
           </nav>
+          <TertiaryPageViewport
+            className={activeTab === "workspace" ? "tertiary-page-viewport-contained" : undefined}
+          >
           {activeTab === "budget" && (
             <section className="project-budget-panel project-tab-panel" aria-label="项目预算">
               <div className={`project-budget-governance${project.data.pauseReason === "budget" ? " is-limited" : project.data.pauseReason ? " is-paused" : " is-ok"}`}>
@@ -1412,9 +1416,10 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
               showProject={false}
             />
           </section>}
+          </TertiaryPageViewport>
         </>
       )}
-      </div>
+      </TertiaryPageShell>
     </OrgWorkspace>
   );
 }

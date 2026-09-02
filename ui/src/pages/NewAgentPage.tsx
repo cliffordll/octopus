@@ -8,6 +8,7 @@ import type { AgentRole, AgentRuntimeType, RuntimeModel } from "../api/types";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { roleLabel } from "../utils/display";
 import { applyRuntimeModelConfig, listRuntimeModelOptions, runtimeConfigAfterSwitch, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
 
@@ -257,12 +258,12 @@ export function NewAgentPage() {
   const { orgId = "" } = useParams();
   return (
     <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
+      <TertiaryPageHeader>
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
           <h1>新建智能体</h1>
         </div>
-      </header>
+      </TertiaryPageHeader>
       <AgentCreateForm orgId={orgId} />
     </AgentsWorkspace>
   );
