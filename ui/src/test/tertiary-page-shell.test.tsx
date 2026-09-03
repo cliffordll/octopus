@@ -20,8 +20,23 @@ describe("TertiaryPageFrame", () => {
     const header = screen.getByRole("heading", { name: "成员" }).closest("header");
     const viewport = screen.getByRole("region", { name: "成员内容" }).parentElement;
     expect(shell).toContainElement(header);
+    expect(shell).toHaveClass("tertiary-page-shell-titled");
     expect(viewport).toHaveClass("tertiary-page-viewport");
     expect(header?.nextElementSibling).toBe(viewport);
+  });
+
+  it("builds a titleless detail frame without reserving a header slot", () => {
+    const { container } = render(
+      <TertiaryPageFrame contained>
+        <section aria-label="无标题详情">内容</section>
+      </TertiaryPageFrame>,
+    );
+
+    const shell = container.querySelector(".tertiary-page-shell");
+    const content = screen.getByRole("region", { name: "无标题详情" });
+    expect(shell).toHaveClass("tertiary-page-shell-titleless");
+    expect(shell).not.toContainElement(container.querySelector(".tertiary-page-header"));
+    expect(content.parentElement).toHaveClass("tertiary-page-viewport", "tertiary-page-viewport-contained");
   });
 
   it("supports a contained body variant", () => {

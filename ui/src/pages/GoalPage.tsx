@@ -160,7 +160,7 @@ export function GoalPage() {
   if (goal.error) return <ErrorNotice error={goal.error} />;
 
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full goal-detail-content" orgId={orgId}>
       <TertiaryPageHeader
         actions={goal.data ? (
           <>

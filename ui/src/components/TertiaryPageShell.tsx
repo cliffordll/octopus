@@ -71,12 +71,20 @@ export function TertiaryPageFrame({
   if (alreadyFramed) return <Fragment>{children}</Fragment>;
 
   const headerIndex = items.findIndex((item) => isValidElement(item) && item.type === TertiaryPageHeader);
-  if (headerIndex < 0) return <Fragment>{children}</Fragment>;
+  if (headerIndex < 0) {
+    return (
+      <TertiaryPageShell className="tertiary-page-shell-titleless">
+        <TertiaryPageViewport className={contained ? "tertiary-page-viewport-contained" : undefined}>
+          {items}
+        </TertiaryPageViewport>
+      </TertiaryPageShell>
+    );
+  }
 
   const header = items[headerIndex] as ReactNode;
   const body = items.filter((_, index) => index !== headerIndex);
   return (
-    <TertiaryPageShell>
+    <TertiaryPageShell className="tertiary-page-shell-titled">
       {header}
       <TertiaryPageViewport className={contained ? "tertiary-page-viewport-contained" : undefined}>
         {body}

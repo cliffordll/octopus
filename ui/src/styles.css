@@ -1941,13 +1941,6 @@ small {
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
-  padding: 0;
-}
-
-.organization-structure-content .tertiary-page-header-canvas {
-  flex: 0 0 auto;
-  margin: var(--tertiary-page-padding-top) var(--tertiary-page-gutter) var(--tertiary-header-content-gap);
-  padding: 0 0 var(--tertiary-header-padding-bottom);
 }
 
 .organization-structure-content .tertiary-page-viewport {
@@ -1957,16 +1950,16 @@ small {
 
 .organization-structure-content .tertiary-page-viewport > .error-notice {
   flex: 0 0 auto;
-  margin: 0 var(--tertiary-page-gutter);
+  margin: 0;
 }
 
 .organization-structure-content .tertiary-page-viewport > .organization-empty-state {
-  margin: 0 var(--tertiary-page-gutter) var(--tertiary-page-gutter);
+  margin: 0;
 }
 
 .organization-structure-content .tertiary-page-viewport > .organization-chart {
   flex: 1 1 auto;
-  margin: 0 var(--tertiary-page-gutter) var(--tertiary-page-gutter);
+  margin: 0;
 }
 
 .organization-chart {
@@ -4581,7 +4574,7 @@ button.project-workspace-item:hover,
   display: flex;
   gap: 16px;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 12px;
 }
 
 .org-section-header > div {
@@ -4618,7 +4611,7 @@ button.project-workspace-item:hover,
 .heartbeat-empty-activity {
   color: #8792a6;
   font-size: 13px;
-  padding: 16px;
+  padding: 16px 12px;
 }
 
 .heartbeat-empty-state {
@@ -4656,7 +4649,7 @@ button.project-workspace-item:hover,
   grid-template-areas: "agent actions" "run run";
   grid-template-columns: minmax(460px, 1fr) auto;
   min-width: 1040px;
-  padding: 10px 16px;
+  padding: 10px 12px;
 }
 
 .heartbeat-upstream-row > .heartbeat-agent-cell {
@@ -4942,7 +4935,7 @@ button.project-workspace-item:hover,
   gap: 16px;
   grid-template-columns: 80px minmax(100px, .7fr) minmax(180px, 1.2fr) minmax(200px, 2fr) 90px;
   min-width: 730px;
-  padding: 12px 16px;
+  padding: 12px;
 }
 
 .heartbeat-activity-row:hover,
@@ -5539,6 +5532,10 @@ button.project-workspace-item:hover,
 .goal-work-sections {
   display: grid;
   gap: 14px;
+}
+
+.goal-detail-content .panel {
+  padding: 12px;
 }
 
 .grid-two {
@@ -6499,7 +6496,7 @@ button.danger {
 
 .issue-cost-card,
 .issue-properties-card {
-  padding: 14px;
+  padding: 12px;
 }
 
 .issue-property-list {
@@ -7899,7 +7896,7 @@ pre {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 16px;
+  padding: 12px;
 }
 
 .approval-detail {
@@ -9043,7 +9040,7 @@ pre {
   background: #0f141d;
   border: 1px solid #202a3b;
   border-radius: 14px;
-  padding: 16px 18px;
+  padding: 16px 12px;
 }
 
 .agent-config-section-heading {
@@ -9735,7 +9732,7 @@ pre {
   display: flex;
   gap: 18px;
   justify-content: space-between;
-  padding: 16px;
+  padding: 16px 12px;
 }
 
 .org-goal-list-heading .eyebrow {
@@ -9831,7 +9828,7 @@ pre {
   font-size: var(--text-base);
   gap: 8px;
   margin: 0;
-  padding: 9px 14px;
+  padding: 9px 12px;
 }
 
 .org-resource-group-count {
@@ -9856,7 +9853,7 @@ pre {
   grid-template-columns: minmax(140px, 24%) minmax(0, 1fr) auto;
   gap: 4px 16px;
   min-width: 0;
-  padding: 10px 16px;
+  padding: 10px 12px;
 }
 
 .org-resource-card + .org-resource-card {
@@ -14428,7 +14425,7 @@ textarea {
 .access-section .invite-row {
   border: 0;
   border-radius: 0;
-  padding: 12px 16px;
+  padding: 12px;
 }
 
 .access-section .member-row + .member-row,
