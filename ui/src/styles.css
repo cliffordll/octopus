@@ -1860,7 +1860,7 @@ small {
 .org-content-full > .agent-skills-page,
 .org-content-full > .chat-panel,
 .org-content-full > .chat-thread-shell,
-.org-content-full > .issue-detail-layout,
+.org-content-full .issue-detail-layout,
 .org-content-full > .issue-status-board,
 .org-content-full > .project-detail-shell,
 .org-content-full > .project-empty-state {
@@ -1868,12 +1868,12 @@ small {
 }
 
 .org-content-full > .approval-detail-layout,
-.org-content-full > .issue-detail-layout,
+.org-content-full .issue-detail-layout,
 .org-content-full .approval-thread {
   max-width: none;
 }
 
-.org-content-full > .issue-detail-layout {
+.org-content-full .issue-detail-layout {
   margin: 0;
 }
 
@@ -5784,8 +5784,11 @@ button.danger {
   column-gap: 24px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
   margin: 0 auto;
   max-width: 1180px;
+  min-height: 0;
   row-gap: 16px;
 }
 
@@ -5793,7 +5796,14 @@ button.danger {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  min-height: 0;
   min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+  scrollbar-color: #344158 transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .issue-detail-context {
@@ -6475,19 +6485,26 @@ button.danger {
 }
 
 .issue-detail-sidebar {
-  align-self: start;
-  border-top: 1px solid #202a3b;
+  align-self: stretch;
+  min-height: 0;
   min-width: 0;
-  padding-top: 18px;
+  overflow: hidden;
 }
 
 .issue-sidebar-sticky {
-  align-self: start;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  position: sticky;
-  top: 18px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  position: static;
+  scrollbar-color: #344158 transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .issue-sidebar-actions {
@@ -8742,6 +8759,7 @@ pre {
 }
 
 .issue-detail-viewport {
+  overflow: hidden;
   padding-right: 4px;
 }
 
@@ -13391,6 +13409,24 @@ pre {
   }
   .issue-sidebar-actions {
     justify-content: flex-start;
+  }
+  .issue-detail-viewport {
+    overflow: visible;
+    padding-right: 0;
+  }
+  .issue-detail-layout {
+    grid-template-rows: auto;
+    height: auto;
+  }
+  .issue-detail-main,
+  .issue-detail-sidebar,
+  .issue-sidebar-sticky {
+    height: auto;
+    overflow: visible;
+  }
+  .issue-detail-main,
+  .issue-sidebar-sticky {
+    padding-right: 0;
   }
   .issue-sidebar-sticky {
     position: static;

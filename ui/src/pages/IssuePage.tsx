@@ -4906,6 +4906,8 @@ export function IssuePage() {
 
             <div className="issue-detail-layout">
 
+          <main className="issue-detail-main">
+
           <div className="issue-detail-context">
 
             <IssueTechnicalMeta issue={issue.data} />
@@ -4968,8 +4970,6 @@ export function IssuePage() {
             {passiveFollowup.error && <ErrorNotice error={passiveFollowup.error} />}
 
           </div>
-
-          <main className="issue-detail-main">
 
             <p className="issue-description">{issue.data.description || "暂无描述"}</p>
 
