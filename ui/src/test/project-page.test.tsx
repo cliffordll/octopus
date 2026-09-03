@@ -391,7 +391,7 @@ it("updates a project and manages its resource attachments", async () => {
     expect.objectContaining({ method: "DELETE" }),
   );
 }, 10_000);
-it("shows project workspace artifacts as a directory tree", async () => {
+it("shows the project main workspace instead of derived task workspaces", async () => {
   const project = {
     id: "project-1",
     orgId: "org-1",
@@ -415,7 +415,7 @@ it("shows project workspace artifacts as a directory tree", async () => {
       cwd: "D:/coding/octopus",
       displayName: "默认代码来源",
       managedFolder: "organizations/org-1/workspaces/artifacts",
-      executionWorkspacePolicy: { mode: "shared_workspace" },
+      executionWorkspacePolicy: { mode: "operator_branch" },
     },
     workspaces: [
       {
@@ -430,7 +430,7 @@ it("shows project workspace artifacts as a directory tree", async () => {
         isPrimary: true,
         status: "active",
         metadata: null,
-        executionWorkspacePolicy: { mode: "shared_workspace" },
+        executionWorkspacePolicy: { defaultMode: "operator_branch" },
         createdAt: "2026-05-28T10:00:00Z",
         updatedAt: "2026-05-28T10:00:00Z",
       },
@@ -440,16 +440,16 @@ it("shows project workspace artifacts as a directory tree", async () => {
     createdAt: "2026-05-28T10:00:00Z",
     updatedAt: "2026-05-28T10:00:00Z",
   };
-  const executionWorkspace = {
+  const derivedTaskWorkspace = {
     id: "exec-1",
     orgId: "org-1",
     projectId: "project-1",
     projectWorkspaceId: "workspace-1",
     sourceIssueId: "issue-1",
-    mode: "shared_workspace",
-    strategyType: "shared_workspace",
-    name: "共享运行",
-    cwd: "D:/coding/octopus",
+    mode: "operator_branch",
+    strategyType: "git_worktree",
+    name: "当前独立运行",
+    cwd: "D:/coding/octopus/.octopus/worktrees/oct-1",
     status: "active",
     branchName: null,
     baseBranchName: null,
@@ -458,12 +458,20 @@ it("shows project workspace artifacts as a directory tree", async () => {
     createdAt: "2026-05-28T10:00:00Z",
     updatedAt: "2026-05-28T11:00:00Z",
   };
+  const executionWorkspace = {
+    ...derivedTaskWorkspace,
+    id: "exec-shared",
+    mode: "shared_workspace",
+    strategyType: "shared_workspace",
+    name: "项目主工作区",
+    cwd: "D:/coding/octopus",
+  };
   const workProduct = {
     id: "wp-1",
     orgId: "org-1",
     projectId: "project-1",
     issueId: "issue-1",
-    executionWorkspaceId: "exec-1",
+    executionWorkspaceId: "exec-shared",
     runtimeServiceId: null,
     type: "report",
     provider: "octopus",
@@ -508,10 +516,10 @@ it("shows project workspace artifacts as a directory tree", async () => {
         { id: "issue-1", orgId: "org-1", identifier: "OCT-1", title: "完成控制台导航", status: "done", priority: "high", projectId: "project-1", parentId: "issue-parent", assigneeAgentId: "agent-1", assigneeUserId: null, createdAt: "2026-05-28T10:00:00Z", updatedAt: "2026-05-28T11:00:00Z" },
       ]);
     }
-    if (path === "/api/execution-workspaces?orgId=org-1&projectId=project-1" && init?.method === "GET") return respond([executionWorkspace]);
-    if (path === "/api/execution-workspaces/exec-1/files" && init?.method === "GET") {
+    if (path === "/api/execution-workspaces?orgId=org-1&projectId=project-1" && init?.method === "GET") return respond([derivedTaskWorkspace, executionWorkspace]);
+    if (path === "/api/execution-workspaces/exec-shared/files" && init?.method === "GET") {
       return respond({
-        workspaceId: "exec-1",
+        workspaceId: "exec-shared",
         root: "D:/coding/octopus",
         available: true,
         error: null,
@@ -542,9 +550,11 @@ it("shows project workspace artifacts as a directory tree", async () => {
   expect(within(panel).queryByText("WORKSPACE OUTPUTS")).not.toBeInTheDocument();
   expect(within(panel).queryByText("按执行工作区查看项目目录与任务产物。")).not.toBeInTheDocument();
   expect(within(panel).queryByText("代码来源")).not.toBeInTheDocument();
-  expect(within(panel).getByText("共享运行")).toBeInTheDocument();
-  const fileTree = await within(panel).findByRole("region", { name: "共享运行 文件树" });
-  const workspaceHeader = within(panel).getByText("共享运行").closest<HTMLElement>(".project-artifact-workspace-heading")!;
+  expect(within(panel).getByText("项目主工作区")).toBeInTheDocument();
+  expect(within(panel).queryByText("当前独立运行")).not.toBeInTheDocument();
+  expect(within(panel).queryByText("暂无任务产物。任务完成并登记产物后会出现在这里。")).not.toBeInTheDocument();
+  const fileTree = await within(panel).findByRole("region", { name: "项目主工作区 文件树" });
+  const workspaceHeader = within(panel).getByText("项目主工作区").closest<HTMLElement>(".project-artifact-workspace-heading")!;
   expect(workspaceHeader.nextElementSibling).toBe(fileTree);
   expect(fileTree).not.toContainElement(workspaceHeader);
   expect(within(workspaceHeader).getByText("shared_workspace")).toBeInTheDocument();

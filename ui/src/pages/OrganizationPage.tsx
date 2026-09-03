@@ -624,9 +624,14 @@ export function OrganizationResourcesPage() {
         ) : (
           <div className="org-resource-groups">
             {resourceGroups.map((group) => (
-              <section className="org-resource-group" key={group.kind} aria-labelledby={`resource-group-${group.kind}`}>
+              <section
+                aria-label={`${organizationResourceKindLabel(group.kind)} · ${group.rows.length}`}
+                className="org-resource-group"
+                key={group.kind}
+              >
                 <h2 className="org-resource-group-heading" id={`resource-group-${group.kind}`}>
-                  {organizationResourceKindLabel(group.kind)} · {group.rows.length}
+                  <span>{organizationResourceKindLabel(group.kind)}</span>
+                  <span aria-hidden="true" className="org-resource-group-count">{group.rows.length}</span>
                 </h2>
                 <div className="org-resource-grid">
                   {group.rows.map((resource) => (

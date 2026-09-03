@@ -299,19 +299,23 @@ function ProjectWorkspaceArtifacts({
 }) {
   const issueMap = new Map(issues.map((issue) => [issue.id, issue]));
   const executionWorkspaceMap = new Map(executionWorkspaces.map((workspace) => [workspace.id, workspace]));
-  const artifactProducts = products.filter(isWorkspaceArtifactProduct);
+  const visibleWorkspaceIds = new Set(executionWorkspaceMap.keys());
+  const artifactProducts = products.filter(
+    (product) => isWorkspaceArtifactProduct(product)
+      && Boolean(product.executionWorkspaceId && visibleWorkspaceIds.has(product.executionWorkspaceId)),
+  );
   const groupedProducts = new Map<string, IssueWorkProduct[]>();
   for (const product of artifactProducts) {
     const key = product.executionWorkspaceId || "unassigned";
     groupedProducts.set(key, [...(groupedProducts.get(key) ?? []), product]);
   }
-  const workspaceIds = [...new Set([...executionWorkspaces.map((workspace) => workspace.id), ...groupedProducts.keys()])];
+  const workspaceIds = executionWorkspaces.map((workspace) => workspace.id);
 
   return (
     <section className="project-workspace-artifacts project-tab-panel-wide" aria-label="工作区产物">
       <div className="project-workspace-artifacts-body">
         {loading && <p className="muted">正在加载工作区产物...</p>}
-        {!loading && artifactProducts.length === 0 && <p className="project-resource-empty muted">暂无任务产物。任务完成并登记产物后会出现在这里。</p>}
+        {!loading && executionWorkspaces.length === 0 && <p className="project-resource-empty muted">当前执行模式暂无工作区。任务开始运行后会显示在这里。</p>}
         <div className="project-artifact-workspace-list">
           {workspaceIds.map((workspaceId) => {
             const workspaceProducts = groupedProducts.get(workspaceId) ?? [];
@@ -611,6 +615,15 @@ export function ProjectPage() {
   }, [project.data]);
   const executionWorkspaceList = Array.isArray(executionWorkspaces.data) ? executionWorkspaces.data : [];
   const projectWorkspaces = project.data?.workspaces ?? [];
+  const primaryProjectWorkspace = project.data?.primaryWorkspace
+    ?? projectWorkspaces.find((workspace) => workspace.isPrimary)
+    ?? projectWorkspaces[0];
+  const projectWorkspaceExecutionList = primaryProjectWorkspace
+    ? executionWorkspaceList.filter(
+      (workspace) => workspace.projectWorkspaceId === primaryProjectWorkspace.id
+        && workspace.mode === "shared_workspace",
+    ).slice(0, 1)
+    : [];
   useEffect(() => {
     const firstWorkspaceId = executionWorkspaceList[0]?.id ?? "";
     if (!selectedExecutionWorkspaceId && firstWorkspaceId) setSelectedExecutionWorkspaceId(firstWorkspaceId);
@@ -1209,9 +1222,9 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
             {issues.error && <ErrorNotice error={issues.error} />}
             <ProjectWorkspaceArtifacts
               agents={agentList}
-              executionWorkspaces={executionWorkspaceList}
+              executionWorkspaces={projectWorkspaceExecutionList}
               issues={projectIssues}
-              loading={workProducts.isLoading || executionWorkspaces.isLoading || issues.isLoading}
+              loading={project.isLoading || workProducts.isLoading || executionWorkspaces.isLoading || issues.isLoading}
               orgId={orgId}
               products={workProducts.data ?? []}
             />

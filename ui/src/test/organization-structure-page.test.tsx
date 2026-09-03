@@ -307,3 +307,22 @@ it("shows organization cost reporting on the organization costs route", async ()
   expect(screen.getByText("platform")).toBeInTheDocument();
   expect(screen.getByText("project-1")).toBeInTheDocument();
 });
+
+it("shows one informative empty state when the organization has no cost data", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/costs/summary" && init?.method === "GET") {
+      return respond({ totalCostCents: 0, eventCount: 0, inputTokens: 0, outputTokens: 0 });
+    }
+    if (path.startsWith("/api/orgs/org-1/costs/") && init?.method === "GET") return respond([]);
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/costs");
+
+  expect(await screen.findByRole("heading", { name: "暂无成本数据" })).toBeInTheDocument();
+  expect(screen.getByText("智能体运行并上报 token 与费用后，成本会自动出现在这里。")).toBeInTheDocument();
+  expect(screen.getByLabelText("成本汇总维度")).toHaveTextContent("智能体Provider计费方项目");
+  expect(screen.queryByRole("heading", { name: "按智能体" })).not.toBeInTheDocument();
+  expect(screen.queryByText("暂无成本记录。")).not.toBeInTheDocument();
+});

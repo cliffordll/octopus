@@ -69,6 +69,7 @@ it("groups organization resources by type and omits empty groups", async () => {
   renderApp("/orgs/org-1/resources");
 
   const links = await screen.findByRole("region", { name: "链接 · 2" });
+  expect(within(links).getByText("2")).toHaveClass("org-resource-group-count");
   expect(within(links).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["First link", "Second link"]);
   expect(within(links).getAllByRole("button", { name: "编辑" })).toHaveLength(2);
   expect(within(links).queryByText("url")).not.toBeInTheDocument();
