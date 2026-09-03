@@ -137,6 +137,7 @@ export function ApprovalPage() {
     ? `Human · ${deciderMember?.displayName ?? compactId(deciderId)}`
     : "—";
   const showsDecisionPanel = isActionable || approval.data?.status === "revision_requested";
+  const isRevisionRequested = approval.data?.status === "revision_requested";
   return (
     <ChatsWorkspace contentClassName="org-content-full approval-detail-content" orgId={orgId}>
       <TertiaryPageHeader
@@ -145,7 +146,7 @@ export function ApprovalPage() {
         title={proposedIssueTitle ?? approval.data?.type ?? "载入中..."}
       />
       {approval.data && (
-        <section className={`approval-detail-layout${showsDecisionPanel ? "" : " approval-detail-layout-resolved"}`}>
+        <section className={`approval-detail-layout${showsDecisionPanel ? "" : " approval-detail-layout-resolved"}${isRevisionRequested ? " approval-detail-layout-revision" : ""}`}>
           <article className="panel approval-detail">
             <dl className="approval-detail-meta">
               <div>
@@ -189,9 +190,9 @@ export function ApprovalPage() {
                 </dl>
               </section>
             )}
-            {approval.data.decisionNote && (
+            {approval.data.decisionNote && !isRevisionRequested && (
               <div className="approval-note">
-                <span>Decision note</span>
+                <span>审核意见</span>
                 <p>{approval.data.decisionNote}</p>
               </div>
             )}
@@ -253,7 +254,10 @@ export function ApprovalPage() {
           </article>
           {showsDecisionPanel && (
             <aside className="panel approval-decision-panel">
-              <h2>审批决策</h2>
+              <div className="approval-decision-heading">
+                <h2>{isRevisionRequested ? "审批结果" : "审批决策"}</h2>
+                {isRevisionRequested && <span className="approval-status-badge revision_requested">已退回</span>}
+              </div>
               {isActionable ? (
               <>
                 <label>
@@ -281,22 +285,32 @@ export function ApprovalPage() {
                 </div>
               </>
               ) : (
-                <p className="muted">请修改请求内容后重新提交审批。</p>
+                <div className="approval-result-summary">
+                  <span>审核意见</span>
+                  <p>{approval.data.decisionNote?.trim() || "审批人未填写审核意见。"}</p>
+                </div>
               )}
               {approval.data.status === "revision_requested" && (
-                <div className="approval-resubmit-form">
-                  <label>
-                    重新提交 Payload JSON
-                    <textarea
-                      className="config-editor"
-                      value={resubmitPayload === "{}" ? currentPayload : resubmitPayload}
-                      onChange={(event) => setResubmitPayload(event.target.value)}
-                    />
-                  </label>
-                  <button className="secondary" disabled={act.isPending} onClick={() => runAction("resubmit")} type="button">
-                    重新提交审批
-                  </button>
-                </div>
+                <details className="approval-resubmit-form">
+                  <summary>
+                    <span>修改并重新提交</span>
+                    <small>展开编辑请求 JSON</small>
+                  </summary>
+                  <div>
+                    <p className="muted">根据审核意见修改请求内容后，再重新提交审批。</p>
+                    <label>
+                      请求 Payload JSON
+                      <textarea
+                        className="config-editor"
+                        value={resubmitPayload === "{}" ? currentPayload : resubmitPayload}
+                        onChange={(event) => setResubmitPayload(event.target.value)}
+                      />
+                    </label>
+                    <button className="secondary" disabled={act.isPending} onClick={() => runAction("resubmit")} type="button">
+                      重新提交审批
+                    </button>
+                  </div>
+                </details>
               )}
               {formError && <p className="error-notice">{formError}</p>}
             </aside>

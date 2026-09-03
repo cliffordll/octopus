@@ -1,6 +1,5 @@
 ﻿import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond, respondStream } from "./render-app";
 
@@ -835,7 +834,7 @@ it("approves a chat issue proposal through the approval API and shows the create
   expect(screen.queryByText("任务提案")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "同意" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "拒绝" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "需修改" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "退回" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "同意" }));
   expect(requests).toContainEqual({
     path: "/api/approvals/approval-1/approve",
@@ -843,6 +842,8 @@ it("approves a chat issue proposal through the approval API and shows the create
   });
   expect(await screen.findByText("任务创建成功")).toBeInTheDocument();
   const createdIssueLink = screen.getByText("任务创建成功").closest("a");
+  expect(createdIssueLink).toHaveClass("chat-system-event-card");
+  expect(within(createdIssueLink as HTMLElement).getByText("任务详情")).toBeInTheDocument();
   expect(createdIssueLink).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
   expect(screen.queryByText("任务创建待确认")).not.toBeInTheDocument();
 });
@@ -1051,10 +1052,10 @@ it("shows an approved chat issue proposal as syncing until the issue-created eve
   expect(await screen.findByText("任务创建结果同步中")).toBeInTheDocument();
   expect(screen.getByText("已同意")).toBeInTheDocument();
   expect(screen.getByText("审批已同意，正在刷新任务创建结果。")).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "查看审批" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /审批详情/ })).toHaveAttribute("href", "/orgs/org-1/approvals/approval-1");
 });
 
-it("does not keep showing a rejected chat issue approval prompt", async () => {
+it("keeps a rejected agent approval and its decision note visible in the conversation", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
       return respond([{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" }]);
@@ -1087,7 +1088,15 @@ it("does not keep showing a rejected chat issue approval prompt", async () => {
     }
     if (path === "/api/agents/agent-1/skills" && init?.method === "GET") return respond({ desiredSkills: [], entries: [] });
     if (path === "/api/approvals/approval-1" && init?.method === "GET") {
-      return respond({ id: "approval-1", orgId: "org-1", type: "chat_issue_creation", status: "rejected", payload: {} });
+      return respond({
+        id: "approval-1",
+        orgId: "org-1",
+        type: "chat_issue_creation",
+        status: "rejected",
+        requestedByAgentId: "agent-1",
+        decisionNote: "任务范围与当前目标不一致。",
+        payload: {},
+      });
     }
     return respond([]);
   });
@@ -1095,11 +1104,16 @@ it("does not keep showing a rejected chat issue approval prompt", async () => {
 
   renderApp("/orgs/org-1/chats/chat-1");
   await screen.findByText("请确认是否创建该任务？");
-  await waitFor(() => {
-    expect(screen.queryByText("任务创建待确认")).not.toBeInTheDocument();
-  });
-  expect(screen.queryByText("已拒绝")).not.toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "查看审批" })).not.toBeInTheDocument();
+  expect(await screen.findByText("审批结果")).toBeInTheDocument();
+  expect(screen.getByText("已拒绝")).toBeInTheDocument();
+  expect(screen.getByText("审核意见")).toBeInTheDocument();
+  expect(screen.getByText("任务范围与当前目标不一致。")).toBeInTheDocument();
+  const decisionPrompt = screen.getByText("任务范围与当前目标不一致。").closest(".chat-system-event-card");
+  expect(decisionPrompt).toHaveClass("chat-system-event-card");
+  expect(decisionPrompt?.closest("article")).toHaveClass("chat-message", "system", "chat-approval-system-message");
+  expect(decisionPrompt?.closest("article")).toHaveTextContent("系统");
+  expect(decisionPrompt).toBe(screen.getByRole("link", { name: /审批详情/ }));
+  expect(screen.getByRole("link", { name: /审批详情/ })).toHaveAttribute("href", "/orgs/org-1/approvals/approval-1");
 });
 
 it("sends a message from an existing conversation by pressing Enter", async () => {

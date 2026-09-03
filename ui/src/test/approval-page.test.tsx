@@ -112,8 +112,15 @@ it("resubmits an approval with edited payload", async () => {
 
   renderApp("/orgs/org-1/approvals/approval-1");
   expect(await screen.findByRole("heading", { level: 1, name: /chat_operation/ })).toBeInTheDocument();
-  await userEvent.clear(screen.getByLabelText("重新提交 Payload JSON"));
-  fireEvent.change(screen.getByLabelText("重新提交 Payload JSON"), { target: { value: '{"action":"new"}' } });
+  expect(screen.getByRole("heading", { name: "审批结果" })).toBeInTheDocument();
+  expect(screen.getByText("已退回")).toBeInTheDocument();
+  expect(screen.getByText("补充参数")).toBeInTheDocument();
+  const resultPanel = screen.getByRole("heading", { name: "审批结果" }).closest("aside");
+  expect(resultPanel).not.toBeNull();
+  expect(resultPanel?.parentElement).toHaveClass("approval-detail-layout-revision");
+  await userEvent.click(screen.getByText("修改并重新提交"));
+  await userEvent.clear(screen.getByLabelText("请求 Payload JSON"));
+  fireEvent.change(screen.getByLabelText("请求 Payload JSON"), { target: { value: '{"action":"new"}' } });
   await userEvent.click(screen.getByRole("button", { name: "重新提交审批" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
