@@ -4,6 +4,8 @@ import type { AgentRuntimeType } from "../api/types";
 type RuntimeConfigFieldsProps = {
   advancedEditor?: ReactNode;
   runtime: AgentRuntimeType;
+  showLiveProbeField?: boolean;
+  showProbeTimeoutField?: boolean;
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
 };
@@ -15,6 +17,12 @@ const UNSUPPORTED_RUNTIMES = new Set<AgentRuntimeType>([
   "hermes_local",
 ]);
 const OPENCODE_SKIP_PERMISSIONS_ARG = "--dangerously-skip-permissions";
+const LOCAL_RUNTIME_DEFAULT_COMMANDS: Partial<Record<AgentRuntimeType, string>> = {
+  codex_local: "codex",
+  claude_local: "claude",
+  opencode_local: "opencode",
+  openclaw_local: "openclaw",
+};
 const PROCESS_DEMO_CONFIG = {
   command: "uv",
   args: ["run", "--no-sync", "python", "-m", "packages.runtimes.process.demo"],
@@ -29,6 +37,11 @@ function stringValue(config: Record<string, unknown>, key: string): string {
 function numberValue(config: Record<string, unknown>, key: string): string {
   const value = config[key];
   return typeof value === "number" ? String(value) : "";
+}
+
+function millisecondsAsSeconds(config: Record<string, unknown>, key: string): string {
+  const value = config[key];
+  return typeof value === "number" ? String(value / 1000) : "";
 }
 
 function stringListValue(config: Record<string, unknown>, key: string): string {
@@ -79,43 +92,51 @@ function setOpenCodeSkipPermissions(config: Record<string, unknown>, enabled: bo
 }
 
 function runtimeSummary(runtime: AgentRuntimeType): string {
-  if (runtime === "http") return "HTTP endpoint runtime";
-  if (runtime === "openclaw_gateway") return "OpenClaw Gateway runtime";
-  if (runtime === "process") return "Process runtime";
-  if (["codex_local", "claude_local", "opencode_local", "openclaw_local"].includes(runtime)) return "Local CLI runtime";
-  return `${runtime} runtime`;
+  if (runtime === "http") return "HTTP 接口参数";
+  if (runtime === "openclaw_gateway") return "OpenClaw Gateway 参数";
+  if (runtime === "process") return "进程参数";
+  if (["codex_local", "claude_local", "opencode_local", "openclaw_local"].includes(runtime)) return "本地 CLI 参数";
+  return `${runtime} 参数`;
 }
 
 function runtimeDefaultHint(runtime: AgentRuntimeType): string {
-  if (runtime === "http") return "默认 POST，30s 超时，无自定义 headers";
-  if (runtime === "openclaw_gateway") return "默认按 run 建立会话，30s 连接，5 分钟等待";
-  if (runtime === "process") return "默认使用 server 侧命令配置和当前工作目录";
-  if (["codex_local", "claude_local", "opencode_local", "openclaw_local"].includes(runtime)) return "默认使用本机 CLI 登录态和 server 工作目录";
-  return "使用 server 推荐默认配置";
+  if (runtime === "http") return "需配置接口地址 · 默认 POST · 30 秒超时";
+  if (runtime === "openclaw_gateway") return "需配置网关地址 · 默认按任务建立会话 · 超时 120 秒";
+  if (runtime === "process") return "需配置启动命令 · 默认组织工作区 · 不限制执行时间";
+  if (["codex_local", "claude_local", "opencode_local", "openclaw_local"].includes(runtime)) return "默认本机 CLI 登录态 · 组织工作区 · 不限制执行时间";
+  return "未填写项使用服务端推荐值";
 }
 
-export function RuntimeConfigFields({ advancedEditor, runtime, value, onChange }: RuntimeConfigFieldsProps) {
+function RuntimeFieldLabel({ defaultValue, name, required = false }: { defaultValue?: string; name: string; required?: boolean }) {
+  return (
+    <span className="runtime-config-field-label">
+      <span>{name}</span>
+      <small className={required ? "is-required" : undefined}>{required ? "必填" : `默认：${defaultValue}`}</small>
+    </span>
+  );
+}
+
+export function RuntimeConfigFields({ advancedEditor, runtime, showLiveProbeField = true, showProbeTimeoutField = true, value, onChange }: RuntimeConfigFieldsProps) {
   const [expanded, setExpanded] = useState(false);
   function setField(key: string, nextValue: unknown) {
     onChange(withoutEmpty({ ...value, [key]: nextValue }));
   }
   const configured = Object.keys(value).length > 0;
 
-  function renderShell(children: ReactNode) {
+  function renderShell(children: ReactNode, layout: "three" | "four" | "gateway" = "three") {
     return (
       <div className="runtime-config-panel">
         <div className="runtime-config-summary">
           <div className="runtime-config-summary-text">
             <strong>{runtimeSummary(runtime)}</strong>
-            <span className="muted">{configured ? "已配置，可按需调整" : "使用推荐默认配置"}</span>
-            <small>{runtimeDefaultHint(runtime)}</small>
+            <span className="muted">{configured ? "已自定义 · " : ""}{runtimeDefaultHint(runtime)}</span>
           </div>
           <button className="secondary small-button" onClick={() => setExpanded((current) => !current)} type="button">
-            {expanded ? "收起配置" : "个性化配置"}
+            {expanded ? "收起参数" : "高级参数"}
           </button>
         </div>
         {expanded && (
-          <div className="runtime-config-fields">
+          <div className={`runtime-config-fields runtime-config-fields--${layout}`}>
             {children}
             {advancedEditor}
           </div>
@@ -136,13 +157,13 @@ export function RuntimeConfigFields({ advancedEditor, runtime, value, onChange }
     return renderShell(
       <>
         <label>
-          Endpoint URL
-          <input placeholder="默认使用 server 配置的 endpoint" value={stringValue(value, "url")} onChange={(event) => setField("url", event.target.value)} />
+          <RuntimeFieldLabel name="接口地址" required />
+          <input aria-label="接口地址" placeholder="https://runtime.example/execute" value={stringValue(value, "url")} onChange={(event) => setField("url", event.target.value)} />
         </label>
         <label>
-          HTTP method
-          <select value={stringValue(value, "method")} onChange={(event) => setField("method", event.target.value)}>
-            <option value="">默认</option>
+          <RuntimeFieldLabel defaultValue="POST" name="请求方法" />
+          <select aria-label="请求方法" value={stringValue(value, "method")} onChange={(event) => setField("method", event.target.value)}>
+            <option value="">使用默认值</option>
             <option value="GET">GET</option>
             <option value="POST">POST</option>
             <option value="PUT">PUT</option>
@@ -150,14 +171,15 @@ export function RuntimeConfigFields({ advancedEditor, runtime, value, onChange }
           </select>
         </label>
         <label>
-          Timeout seconds
-          <input min="0" placeholder="30" type="number" value={numberValue(value, "timeoutSec")} onChange={(event) => setField("timeoutSec", event.target.value ? Number(event.target.value) : "")} />
+          <RuntimeFieldLabel defaultValue="30 秒" name="请求超时（秒）" />
+          <input aria-label="请求超时（秒）" min="0" placeholder="30" type="number" value={numberValue(value, "timeoutSec")} onChange={(event) => setField("timeoutSec", event.target.value ? Number(event.target.value) : "")} />
         </label>
         <label>
-          Headers JSON
-          <textarea className="config-editor" placeholder={'默认 {}，例如 {"Authorization":"Bearer ..."}'} value={JSON.stringify(value.headers ?? {}, null, 2)} onChange={(event) => setField("headers", parseJsonObjectField(event.target.value))} />
+          <RuntimeFieldLabel defaultValue="空对象" name="请求头（JSON）" />
+          <textarea aria-label="请求头（JSON）" className="config-editor" placeholder={'例如 {"Authorization":"Bearer ..."}'} value={JSON.stringify(value.headers ?? {}, null, 2)} onChange={(event) => setField("headers", parseJsonObjectField(event.target.value))} />
         </label>
       </>,
+      "three",
     );
   }
 
@@ -165,39 +187,40 @@ export function RuntimeConfigFields({ advancedEditor, runtime, value, onChange }
     return renderShell(
       <>
         <label>
-          Gateway URL
-          <input placeholder="默认使用 server 配置；例如 wss://gateway.example/ws" value={stringValue(value, "url")} onChange={(event) => setField("url", event.target.value)} />
+          <RuntimeFieldLabel name="网关地址" required />
+          <input aria-label="网关地址" placeholder="wss://gateway.example/ws" value={stringValue(value, "url")} onChange={(event) => setField("url", event.target.value)} />
         </label>
         <label>
-          Auth token
-          <input placeholder="默认使用 server secret，不在 UI 明文保存" value={stringValue(value, "authToken")} onChange={(event) => setField("authToken", event.target.value)} />
+          <RuntimeFieldLabel defaultValue="无" name="认证令牌" />
+          <input aria-label="认证令牌" autoComplete="off" placeholder="网关需要认证时填写" type="password" value={stringValue(value, "authToken")} onChange={(event) => setField("authToken", event.target.value)} />
         </label>
         <label>
-          Session key strategy
-          <select value={stringValue(value, "sessionKeyStrategy")} onChange={(event) => setField("sessionKeyStrategy", event.target.value)}>
-            <option value="">默认</option>
-            <option value="run">run</option>
-            <option value="issue">issue</option>
-            <option value="fixed">fixed</option>
+          <RuntimeFieldLabel defaultValue="按任务" name="会话策略" />
+          <select aria-label="会话策略" value={stringValue(value, "sessionKeyStrategy")} onChange={(event) => setField("sessionKeyStrategy", event.target.value)}>
+            <option value="">使用默认值</option>
+            <option value="issue">按任务</option>
+            <option value="run">按运行</option>
+            <option value="fixed">固定会话</option>
           </select>
         </label>
-        <label>
-          Timeout seconds
-          <input min="0" placeholder="30" type="number" value={numberValue(value, "timeoutSec")} onChange={(event) => setField("timeoutSec", event.target.value ? Number(event.target.value) : "")} />
+        <label className="runtime-config-field-half">
+          <RuntimeFieldLabel defaultValue="120 秒" name="连接超时（秒）" />
+          <input aria-label="连接超时（秒）" min="0" placeholder="120" type="number" value={numberValue(value, "timeoutSec")} onChange={(event) => setField("timeoutSec", event.target.value ? Number(event.target.value) : "")} />
+        </label>
+        <label className="runtime-config-field-half">
+          <RuntimeFieldLabel defaultValue="120 秒" name="等待超时（秒）" />
+          <input aria-label="等待超时（秒）" min="0" placeholder="120" type="number" value={millisecondsAsSeconds(value, "waitTimeoutMs")} onChange={(event) => setField("waitTimeoutMs", event.target.value ? Number(event.target.value) * 1000 : "")} />
         </label>
         <label>
-          Wait timeout ms
-          <input min="0" placeholder="300000" type="number" value={numberValue(value, "waitTimeoutMs")} onChange={(event) => setField("waitTimeoutMs", event.target.value ? Number(event.target.value) : "")} />
+          <RuntimeFieldLabel defaultValue="空对象" name="请求头（JSON）" />
+          <textarea aria-label="请求头（JSON）" className="config-editor" placeholder="{}" value={JSON.stringify(value.headers ?? {}, null, 2)} onChange={(event) => setField("headers", parseJsonObjectField(event.target.value))} />
         </label>
         <label>
-          Headers JSON
-          <textarea className="config-editor" placeholder='默认 {}' value={JSON.stringify(value.headers ?? {}, null, 2)} onChange={(event) => setField("headers", parseJsonObjectField(event.target.value))} />
-        </label>
-        <label>
-          Payload template JSON
-          <textarea className="config-editor" placeholder="默认使用标准 issue/run payload" value={JSON.stringify(value.payloadTemplate ?? {}, null, 2)} onChange={(event) => setField("payloadTemplate", parseJsonObjectField(event.target.value))} />
+          <RuntimeFieldLabel defaultValue="标准任务与运行载荷" name="载荷模板（JSON）" />
+          <textarea aria-label="载荷模板（JSON）" className="config-editor" placeholder="{}" value={JSON.stringify(value.payloadTemplate ?? {}, null, 2)} onChange={(event) => setField("payloadTemplate", parseJsonObjectField(event.target.value))} />
         </label>
       </>,
+      "gateway",
     );
   }
 
@@ -206,42 +229,52 @@ export function RuntimeConfigFields({ advancedEditor, runtime, value, onChange }
       <>
         <div className="runtime-config-check-row">
           <span>
-            <strong>内置 process demo</strong>
-            <small>验证 server 可以启动外部进程并收集 stdout；CWD 留空即可。</small>
+            <strong>内置进程示例</strong>
+            <small>用于验证服务端可以启动外部进程并收集输出，工作目录留空即可。</small>
           </span>
           <button className="secondary small-button" type="button" onClick={() => onChange(PROCESS_DEMO_CONFIG)}>
-            使用内置 demo
+            使用示例
           </button>
         </div>
         <label>
-          Command
-          <input placeholder="默认使用 server 侧命令" value={stringValue(value, "command")} onChange={(event) => setField("command", event.target.value)} />
+          <RuntimeFieldLabel name="启动命令" required />
+          <input aria-label="启动命令" placeholder="例如 uv" value={stringValue(value, "command")} onChange={(event) => setField("command", event.target.value)} />
         </label>
         <label>
-          Args
-          <input placeholder="默认无；逗号分隔" value={stringListValue(value, "args")} onChange={(event) => setField("args", parseList(event.target.value))} />
+          <RuntimeFieldLabel defaultValue="无" name="命令参数" />
+          <input aria-label="命令参数" placeholder="多个参数用逗号分隔" value={stringListValue(value, "args")} onChange={(event) => setField("args", parseList(event.target.value))} />
         </label>
         <label>
-          CWD
-          <input placeholder="默认组织工作区" value={stringValue(value, "cwd")} onChange={(event) => setField("cwd", event.target.value)} />
+          <RuntimeFieldLabel defaultValue="组织工作区" name="工作目录" />
+          <input aria-label="工作目录" placeholder="留空使用组织工作区" value={stringValue(value, "cwd")} onChange={(event) => setField("cwd", event.target.value)} />
+        </label>
+        <label>
+          <RuntimeFieldLabel defaultValue="不限制" name="执行超时（秒）" />
+          <input aria-label="执行超时（秒）" min="0" placeholder="0" type="number" value={numberValue(value, "timeoutSec")} onChange={(event) => setField("timeoutSec", event.target.value ? Number(event.target.value) : "")} />
         </label>
       </>,
+      "four",
     );
   }
 
+  const defaultCommand = LOCAL_RUNTIME_DEFAULT_COMMANDS[runtime] ?? "CLI";
   return renderShell(
     <>
       <label>
-        Command
-        <input placeholder="默认使用 runtime 对应 CLI 命令" value={stringValue(value, "command")} onChange={(event) => setField("command", event.target.value)} />
+        <RuntimeFieldLabel defaultValue={defaultCommand} name="启动命令" />
+        <input aria-label="启动命令" placeholder={`留空使用 ${defaultCommand}`} value={stringValue(value, "command")} onChange={(event) => setField("command", event.target.value)} />
       </label>
       <label>
-        CWD
-        <input placeholder="默认组织工作区" value={stringValue(value, "cwd")} onChange={(event) => setField("cwd", event.target.value)} />
+        <RuntimeFieldLabel defaultValue="组织工作区" name="工作目录" />
+        <input aria-label="工作目录" placeholder="留空使用组织工作区" value={stringValue(value, "cwd")} onChange={(event) => setField("cwd", event.target.value)} />
       </label>
       <label>
-        Extra args
-        <input placeholder="默认无；逗号分隔" value={stringListValue(value, "extraArgs")} onChange={(event) => setField("extraArgs", parseList(event.target.value))} />
+        <RuntimeFieldLabel defaultValue="无" name="附加参数" />
+        <input aria-label="附加参数" placeholder="多个参数用逗号分隔" value={stringListValue(value, "extraArgs")} onChange={(event) => setField("extraArgs", parseList(event.target.value))} />
+      </label>
+      <label>
+        <RuntimeFieldLabel defaultValue="不限制" name="执行超时（秒）" />
+        <input aria-label="执行超时（秒）" min="0" placeholder="0" type="number" value={numberValue(value, "timeoutSec")} onChange={(event) => setField("timeoutSec", event.target.value ? Number(event.target.value) : "")} />
       </label>
       {runtime === "opencode_local" && (
         <label className="runtime-config-check-row">
@@ -255,15 +288,16 @@ export function RuntimeConfigFields({ advancedEditor, runtime, value, onChange }
           <small>使用 --dangerously-skip-permissions，自动批准未显式拒绝的本地工具权限请求；仅适用于本地可信开发环境。</small>
         </label>
       )}
-      <label className="runtime-config-check-row">
+      {showLiveProbeField && <label className="runtime-config-check-row">
         <strong>实时探测</strong>
         <input aria-label="实时探测运行时" checked={value.liveProbe === true} type="checkbox" onChange={(event) => setField("liveProbe", event.target.checked ? true : "")} />
         <small>保存或测试时真实检查本地 CLI / 适配器是否可用；默认关闭。</small>
-      </label>
-      <label>
-        探测超时秒数
-        <input min="0" placeholder="10" type="number" value={numberValue(value, "probeTimeoutSec")} onChange={(event) => setField("probeTimeoutSec", event.target.value ? Number(event.target.value) : "")} />
-      </label>
+      </label>}
+      {showProbeTimeoutField && <label>
+        <RuntimeFieldLabel defaultValue="5 秒" name="检查超时（秒）" />
+        <input aria-label="检查超时（秒）" min="0" placeholder="5" type="number" value={numberValue(value, "probeTimeoutSec")} onChange={(event) => setField("probeTimeoutSec", event.target.value ? Number(event.target.value) : "")} />
+      </label>}
     </>,
+    "four",
   );
 }

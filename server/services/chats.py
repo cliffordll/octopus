@@ -77,6 +77,7 @@ from packages.shared.types.issue import CreateIssuePayload
 from ._time import ensure_aware
 from .agents import prepare_agent_runtime_config
 from .budgets import BudgetService
+from .chat_issue_assignees import ChatIssueAssigneeResolver
 from .costs import CostService
 from .issues import IssueService
 from .runtime_providers import inject_runtime_provider_config
@@ -165,7 +166,7 @@ class ChatService:
                     _chat_issue_creation_mode(org.default_chat_issue_creation_mode),
                 ),
                 "plan_mode": payload.get("planMode", False),
-                "created_by_user_id": actor_id if actor_type == "board" else None,
+                "created_by_user_id": actor_id if actor_type == "user" else None,
             },
         )
         for link in payload.get("contextLinks", []):
@@ -433,7 +434,7 @@ class ChatService:
             "description": proposal.get("description"),
             "priority": proposal.get("priority", "medium"),
             "createdByAgentId": actor_id if actor_type == "agent" else None,
-            "createdByUserId": actor_id if actor_type == "board" else None,
+            "createdByUserId": actor_id if actor_type == "user" else None,
             "originKind": "manual",
             "originId": conversation.id,
         }
@@ -536,7 +537,7 @@ class ChatService:
         current_payload["operationProposalState"] = {
             "status": status,
             "decisionNote": payload.get("decisionNote"),
-            "decidedByUserId": actor_id if actor_type == "board" else None,
+            "decidedByUserId": actor_id if actor_type == "user" else None,
             "decidedAt": datetime.now(UTC).isoformat(),
         }
         updated = await update_message(
@@ -603,7 +604,10 @@ class ChatService:
     ) -> dict[str, Any]:
         direct = payload.get("proposal")
         if isinstance(direct, dict):
-            return _issue_proposal_from_payload(direct)
+            proposal = _issue_proposal_from_payload(direct)
+            return await ChatIssueAssigneeResolver(self._session).resolve(
+                conversation.org_id, proposal
+            )
         message_id = payload.get("messageId")
         message: ChatMessageRow | None = None
         if message_id is not None:
@@ -630,7 +634,9 @@ class ChatService:
                     conversation.org_id, message.replying_agent_id
                 ),
             }
-        return proposal
+        return await ChatIssueAssigneeResolver(self._session).resolve(
+            conversation.org_id, proposal
+        )
 
     async def add_message_and_reply(
         self,
@@ -1000,11 +1006,17 @@ class ChatService:
                     "create files. Do not run commands. Return a single JSON "
                     'object with summary, kind="issue_proposal", '
                     "and structuredPayload.issueProposal containing title, "
-                    "description, priority, assigneeAgentId, projectId, goalId, "
+                    "description, priority, assigneeAgentId or assigneeUserId, projectId, goalId, "
                     "or parentId when known. auto_create is a server-side issue "
                     "conversion mode, not permission for you to execute the "
                     "requested task. The UI/server will convert the proposal "
                     "according to the conversation issueCreationMode."
+                ),
+                (
+                    "Use assigneeUserId when the requested assignee is a Human and "
+                    "assigneeAgentId when it is an Agent. If only a member name is "
+                    "known, put that name in the correctly typed field; the server "
+                    "will resolve it to the organization member ID."
                 ),
                 (
                     "Multiple tasks in the same chat are parallel by default. "

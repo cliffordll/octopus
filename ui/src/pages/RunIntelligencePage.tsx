@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { runIntelligenceApi, type RunIntelligenceRecord } from "../api/runIntelligence";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { OrgWorkspace } from "./OrganizationPage";
 
 function text(value: unknown): string {
@@ -43,14 +44,13 @@ export function RunIntelligencePage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
+      <TertiaryPageHeader
+        actions={<Link className="button secondary small-button" to={`/orgs/${orgId}/heartbeat-runs`}>返回运行记录</Link>}
+        eyebrow="Run Intelligence"
+        supporting="按运行标识检索执行详情、事件与日志。"
+        title="运行分析"
+      />
       <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Run Intelligence</p>
-            <h1>运行分析</h1>
-          </div>
-          <Link className="button secondary small-button" to={`/orgs/${orgId}/heartbeat-runs`}>返回运行记录</Link>
-        </div>
         <label>
           Run ID 前缀
           <input value={runPrefix} onChange={(event) => setRunPrefix(event.target.value)} placeholder="输入 run id 前缀过滤" />

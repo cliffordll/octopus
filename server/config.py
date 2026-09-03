@@ -17,6 +17,10 @@ class Settings:
     graceful_shutdown_timeout_seconds: int
     heartbeat_scheduler_enabled: bool
     heartbeat_scheduler_interval_seconds: float
+    auth_session_cookie_name: str
+    proxy_auth_secret: str | None
+    proxy_auth_issuer: str | None
+    proxy_auth_audience: str | None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -41,6 +45,12 @@ class Settings:
                     os.environ.get("OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS", "5")
                 ),
             ),
+            auth_session_cookie_name=os.environ.get(
+                "OCTOPUS_AUTH_SESSION_COOKIE_NAME", "octopus_session"
+            ),
+            proxy_auth_secret=os.environ.get("OCTOPUS_PROXY_AUTH_SECRET") or None,
+            proxy_auth_issuer=os.environ.get("OCTOPUS_PROXY_AUTH_ISSUER") or None,
+            proxy_auth_audience=os.environ.get("OCTOPUS_PROXY_AUTH_AUDIENCE") or None,
         )
 
 

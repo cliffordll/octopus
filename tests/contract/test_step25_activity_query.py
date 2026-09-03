@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 import uuid
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from starlette.responses import Response
 
-from packages.database.clients import create_database_engine, create_session_factory
+from packages.database.clients import (
+    async_write_transaction,
+    create_database_engine,
+    create_session_factory,
+)
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.schema import (
     Agent,
@@ -21,6 +26,7 @@ from packages.database.schema import (
     Organization,
 )
 from server.app import create_app
+from server.auth.root_provisioning import RootProvisioningService
 
 
 @pytest.fixture
@@ -34,6 +40,28 @@ async def app(
     factory = create_session_factory(engine)
     application = create_app()
     application.state.session_factory = factory
+    async with factory() as session:
+        async with async_write_transaction(session):
+            root_id = await RootProvisioningService(session).create(
+                name="Test Root",
+                email="step25-root@example.com",
+                password="secure-password",
+            )
+
+    @application.middleware("http")
+    async def inject_test_root(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        if request.headers.get("x-test-user-id"):
+            request.state.actor = {
+                "type": "user",
+                "id": root_id,
+                "userId": root_id,
+                "isRoot": True,
+                "source": "test",
+            }
+        return await call_next(request)
+
     try:
         yield application, factory
     finally:
@@ -299,5 +327,8 @@ async def _request(
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.request(method, path, json=json, headers=headers)
+        effective_headers = headers or {"x-test-user-id": "root"}
+        response = await client.request(
+            method, path, json=json, headers=effective_headers
+        )
     return response.status_code, response.json()

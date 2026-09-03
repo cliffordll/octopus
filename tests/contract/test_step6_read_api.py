@@ -33,10 +33,13 @@ async def _inject_test_actor(
 ) -> Response:
     actor_type = request.headers.get("x-test-actor-type")
     if actor_type:
+        is_root = actor_type == "board"
         request.state.actor = {
-            "type": actor_type,
+            "type": "user" if is_root else actor_type,
             "id": request.headers.get("x-test-actor-id", "test-actor"),
             "orgId": request.headers.get("x-test-org-id"),
+            "isRoot": is_root,
+            "source": "legacy_contract_root" if is_root else "test",
         }
     return await call_next(request)
 
@@ -198,7 +201,7 @@ async def test_org_detail_non_board_returns_403(
     org_id = await _seed_org(session)
     code, body = await _http_get(app, f"/api/orgs/{org_id}", actor_type="agent")
     assert code == 403
-    assert "Board access required" in body["detail"]
+    assert body["detail"] == "Principal cannot access this organization"
 
 
 async def test_org_detail_missing_returns_404(app: FastAPI) -> None:

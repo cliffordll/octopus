@@ -3,13 +3,22 @@ import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "../app/App";
 
-export function renderApp(initialEntry: string | { pathname: string; state?: unknown }) {
+export function renderApp(
+  initialEntry: string | { pathname: string; state?: unknown },
+  options: { authenticated?: boolean } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
+  if (options.authenticated !== false) {
+    queryClient.setQueryData(["auth-session"], {
+      user: { id: "test-user", name: "Test User", email: "test@example.com" },
+      session: { source: "session" },
+    });
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>

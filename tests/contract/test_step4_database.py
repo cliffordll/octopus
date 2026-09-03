@@ -274,7 +274,9 @@ async def test_run_recovery_migration_repairs_partially_materialized_schema(
             "select id, idempotency_key from agent_wakeup_requests order by id"
         ).fetchall()
 
-    assert revision == ("20260826_000031",)
+    head = ScriptDirectory.from_config(_build_config(database_url)).get_current_head()
+    assert head is not None
+    assert revision == (head,)
     assert "process_exited_at" in run_columns
     assert "execution_owner_token" in run_columns
     assert "terminal_effects_pending" in run_columns
@@ -817,7 +819,7 @@ async def test_org_service_list_chains_through_query(
     async with async_transaction(session):
         session.add(org)
     service = OrgService(session)
-    summaries = await service.list()
+    summaries = await service.list(can_access_all=True)
     assert len(summaries) == 1
     assert summaries[0]["urlKey"] == "acme"
     assert summaries[0]["name"] == "Acme Co"

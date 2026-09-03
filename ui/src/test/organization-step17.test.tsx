@@ -23,10 +23,25 @@ it("manages organization resources from the organization navigation", async () =
 
   renderApp("/orgs/org-1/resources");
 
-  expect(await screen.findByRole("heading", { name: "资源" })).toBeInTheDocument();
+  const resourceHeading = await screen.findByRole("heading", { name: "资源", level: 1 });
+  const resourceHeader = resourceHeading.closest("header")!;
+  expect(resourceHeader).toHaveClass("page-header");
+  expect(resourceHeader).not.toHaveClass("org-resource-hero");
+  expect(resourceHeader.closest(".org-content")).toHaveClass("org-content-full");
+  expect(within(resourceHeader).getByText("Resources")).toHaveClass("eyebrow");
+  expect(within(resourceHeader).getByRole("button", { name: "添加资源" })).toBeInTheDocument();
+  expect(within(resourceHeader).getByRole("link", { name: "浏览工作区" })).toHaveAttribute("href", "/orgs/org-1/workspaces");
   expect(screen.getByRole("link", { name: /资源/ })).toHaveClass("active");
   expect(await screen.findByText("Repository")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "目录" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "目录" })).not.toBeInTheDocument();
+  expect(screen.queryByText("使用稳定名称和明确定位符，便于智能体可靠引用资源。")).not.toBeInTheDocument();
+  const resourceList = screen.getByRole("region", { name: "资源列表" });
+  expect(within(resourceList).getByRole("heading", { name: "Repository" })).toBeInTheDocument();
+  expect(within(resourceList).getByTitle("Repository")).toBeInTheDocument();
+  expect(within(resourceList).getByTitle("https://example.test/repo")).toHaveTextContent("https://example.test/repo");
+  expect(within(resourceList).getByTitle("Code")).toHaveClass("org-resource-description");
+  expect(within(resourceList).getByRole("button", { name: "编辑" })).toBeInTheDocument();
+  expect(within(resourceList).getByRole("button", { name: "删除" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "添加资源" }));
   await userEvent.type(screen.getByLabelText("名称"), "Runbook");
   await userEvent.selectOptions(screen.getByLabelText("类型"), "file");
@@ -40,6 +55,36 @@ it("manages organization resources from the organization navigation", async () =
       body: JSON.stringify({ name: "Runbook", kind: "file", locator: "docs/runbook.md", description: null }),
     }),
   );
+});
+
+it("groups organization resources by type and omits empty groups", async () => {
+  const rows = [
+    { id: "link-1", name: "First link", kind: "url" },
+    { id: "dir-1", name: "Workspace directory", kind: "directory" },
+    { id: "connector-1", name: "External object", kind: "connector_object" },
+    { id: "link-2", name: "Second link", kind: "url" },
+  ].map((resource) => ({ ...resource, orgId: "org-1", locator: resource.id, description: null, metadata: null }));
+  vi.stubGlobal("fetch", vi.fn((path: string) => respond(path === "/api/orgs/org-1/resources" ? rows : [])));
+
+  renderApp("/orgs/org-1/resources");
+
+  const links = await screen.findByRole("region", { name: "链接 · 2" });
+  expect(within(links).getByText("2")).toHaveClass("org-resource-group-count");
+  expect(within(links).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["First link", "Second link"]);
+  expect(within(links).getAllByRole("button", { name: "编辑" })).toHaveLength(2);
+  expect(within(links).queryByText("url")).not.toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "目录 · 1" })).getByText("Workspace directory")).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "连接器对象 · 1" })).getByText("External object")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: /^文件 ·/ })).not.toBeInTheDocument();
+});
+
+it("shows no type groups for an empty organization resources list", async () => {
+  vi.stubGlobal("fetch", vi.fn(() => respond([])));
+
+  renderApp("/orgs/org-1/resources");
+
+  expect(await screen.findByLabelText("No resources")).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "资源列表" })).queryAllByRole("heading")).toHaveLength(0);
 });
 
 it("shows organization skills and edits the selected skill file", async () => {
@@ -179,7 +224,22 @@ it("shows organization skills and edits the selected skill file", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/skills");
-  expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
+  const skillsHeader = (await screen.findByRole("heading", { name: "技能", level: 1 })).closest("header")!;
+  expect(skillsHeader).toHaveClass("page-header");
+  expect(skillsHeader.closest(".org-content")).toHaveClass("org-content-full", "organization-skills-content");
+  expect(within(skillsHeader).getByText("Skills")).toHaveClass("eyebrow");
+  expect(await within(skillsHeader).findByText("3 个可用")).toHaveClass("tertiary-page-supporting");
+  expect(within(skillsHeader).queryByRole("button")).not.toBeInTheDocument();
+  const skillManagement = screen.getByRole("group", { name: "技能管理" });
+  expect(within(skillManagement).getByRole("button", { name: "导入" })).toBeInTheDocument();
+  expect(within(skillManagement).getByRole("button", { name: "扫描" })).toBeInTheDocument();
+  expect(skillManagement.parentElement).toHaveClass("organization-skill-list-tools");
+  expect(skillManagement.nextElementSibling).toContainElement(screen.getByLabelText("搜索技能"));
+  await userEvent.click(within(skillManagement).getByRole("button", { name: "创建技能" }));
+  expect(screen.getByRole("heading", { name: "添加技能" })).toBeInTheDocument();
+  const createHeader = screen.getByRole("heading", { name: "添加技能" }).closest(".task-modal-header")!;
+  await userEvent.click(within(createHeader).getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("heading", { name: "添加技能" })).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能列表" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "社区技能列表" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "本地技能列表" })).toBeInTheDocument();
@@ -190,8 +250,19 @@ it("shows organization skills and edits the selected skill file", async () => {
   expect(screen.getByRole("button", { name: /Skill Creator/ })).toHaveClass("selected");
   expect(screen.queryByText("只读：内置")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "删除" })).toBeDisabled();
-  expect(await screen.findByText("Builder")).toBeInTheDocument();
-  expect(await screen.findByText("Reviewer")).toBeInTheDocument();
+  expect(screen.getByText("来源路径")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "更多信息" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "技能信息", hidden: true })).not.toBeInTheDocument();
+  expect(screen.getByText("兼容性")).toBeVisible();
+  const searchSection = screen.getByLabelText("搜索技能").closest(".organization-skill-search")!;
+  const listTools = searchSection.parentElement!;
+  const skillsSidebar = listTools.parentElement!;
+  expect(skillsSidebar).toHaveClass("organization-skills-sidebar");
+  expect(listTools.nextElementSibling).toHaveClass("organization-skill-list-panel");
+  const skillOverview = screen.getByRole("heading", { name: "Skill Creator" }).closest(".organization-skill-overview")!;
+  expect(skillOverview.parentElement).toHaveClass("organization-skill-pane");
+  expect(skillOverview.parentElement?.parentElement).toBe(skillsSidebar.parentElement);
+  expect(skillOverview.nextElementSibling).toHaveClass("organization-skill-body");
 
   await userEvent.click(screen.getByRole("button", { name: /Review/ }));
   expect(screen.queryByText("Review code changes")).not.toBeInTheDocument();
@@ -216,6 +287,7 @@ it("shows organization skills and edits the selected skill file", async () => {
   );
   await userEvent.click(screen.getByRole("button", { name: /SKILL.md/ }));
   const editor = await screen.findByLabelText("SKILL.md");
+  expect(editor.closest(".file-browser") as HTMLElement).toHaveClass("organization-skill-content-layout");
   await userEvent.type(editor, "{End}{Enter}Updated");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
 

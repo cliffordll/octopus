@@ -57,6 +57,7 @@ _CREATE_CHILD_ISSUE_FIELDS = {
     "description",
     "priority",
     "assigneeAgentId",
+    "assigneeUserId",
     "reviewerAgentId",
 }
 
@@ -104,6 +105,17 @@ def _check_nullable_ref_fields(payload: Mapping[str, Any]) -> None:
             value = payload[field]
             if value is not None and not isinstance(value, str):
                 raise ValueError(f"'{field}' must be a string or null")
+
+
+def _check_dual_principal_fields(payload: Mapping[str, Any]) -> None:
+    for label, agent_field, user_field in (
+        ("assignee", "assigneeAgentId", "assigneeUserId"),
+        ("reviewer", "reviewerAgentId", "reviewerUserId"),
+    ):
+        if payload.get(agent_field) and payload.get(user_field):
+            raise ValueError(
+                f"'{label}' must use either {agent_field} or {user_field}, not both"
+            )
 
 
 def _check_status_priority_origin(payload: Mapping[str, Any]) -> None:
@@ -166,6 +178,7 @@ def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
 
     _check_status_priority_origin(payload)
     _check_nullable_ref_fields(payload)
+    _check_dual_principal_fields(payload)
 
     if "originId" in payload:
         origin_id = payload["originId"]
@@ -202,9 +215,12 @@ def validate_create_child_issues(
             validated.append(validate_create_issue(candidate))
         except ValueError as exc:
             raise ValueError(f"Invalid children[{index}]: {exc}") from exc
-        if not candidate.get("assigneeAgentId"):
+        assignee_agent_id = candidate.get("assigneeAgentId")
+        assignee_user_id = candidate.get("assigneeUserId")
+        if bool(assignee_agent_id) == bool(assignee_user_id):
             raise ValueError(
-                f"'children[{index}].assigneeAgentId' is required for delegated work"
+                f"'children[{index}]' must declare exactly one of "
+                "assigneeAgentId or assigneeUserId"
             )
         normalized_title = candidate["title"].strip().casefold()
         if normalized_title in seen_titles:
@@ -294,6 +310,7 @@ def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
 
     _check_status_priority_origin(payload)
     _check_nullable_ref_fields(payload)
+    _check_dual_principal_fields(payload)
 
     if "comment" in payload:
         comment = payload["comment"]

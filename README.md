@@ -25,6 +25,20 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
 uv run alembic upgrade head
+```
+
+全新数据库首次启动时，需要显式创建实例 Root 账号。命令会提示输入密码；
+后续正常重启不需要重复执行：
+
+```powershell
+uv run python -m cli root create `
+  --name "Root" `
+  --email "root@example.com"
+```
+
+然后启动 server：
+
+```powershell
 .\.venv\Scripts\python.exe -m server
 ```
 

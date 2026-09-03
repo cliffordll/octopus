@@ -5,6 +5,12 @@ import { Link, useParams } from "react-router-dom";
 
 import { activityApi } from "../api/activity";
 
+import { accessApi, authApi, type OrganizationHierarchyMember } from "../api/access";
+
+import { AUTH_SESSION_STALE_TIME_MS } from "../auth/sessionCache";
+
+import { organizationMembersWithAgentFallback } from "../utils/organizationMembers";
+
 import { agentsApi } from "../api/agents";
 
 import { goalsApi } from "../api/goals";
@@ -60,6 +66,7 @@ import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 import { StatusPill } from "../components/StatusPill";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
 
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
 
@@ -70,6 +77,8 @@ import { writeRecentIssue } from "../utils/recentIssues";
 import { formatRuntimeLog } from "../utils/runtimeLog";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
+
+const HUMAN_EXECUTION_STATUSES = new Set<IssueStatus>(["todo", "in_progress", "done", "blocked"]);
 
 const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
 
@@ -107,6 +116,22 @@ function agentName(agentId: string | null | undefined, agentsById: Map<string, A
 
   return agentsById.get(agentId)?.name ?? agentId;
 
+}
+
+function issueAssigneeLabel(
+  issue: Pick<IssueDetail, "assigneeAgentId" | "assigneeUserId">,
+  membersByPrincipal: Map<string, OrganizationHierarchyMember>,
+  agentsById: Map<string, Agent>,
+): string {
+  if (issue.assigneeUserId) {
+    const member = membersByPrincipal.get(`user:${issue.assigneeUserId}`);
+    return `Human · ${member?.displayName ?? issue.assigneeUserId}`;
+  }
+  if (issue.assigneeAgentId) {
+    const member = membersByPrincipal.get(`agent:${issue.assigneeAgentId}`);
+    return `Agent · ${member?.displayName ?? agentName(issue.assigneeAgentId, agentsById)}`;
+  }
+  return "未分配";
 }
 
 function agentMentionToken(agent: Agent): string {
@@ -1660,10 +1685,8 @@ function issueStatusOptionDisabledReason(issue: IssueDetail, status: IssueStatus
 
 function IssueIdStrip({ issue }: { issue: IssueDetail }) {
   const items = [
-    { label: "任务 ID", value: issue.id },
     { label: "任务阶段", value: statusLabel(issue.status) },
     { label: "优先级", value: priorityLabel(issue.priority) },
-    ...(issue.originId ? [{ label: issue.originKind === "manual" ? "来源 ID" : "来源运行 ID", value: issue.originId }] : []),
   ];
 
   return (
@@ -1676,6 +1699,23 @@ function IssueIdStrip({ issue }: { issue: IssueDetail }) {
     </dl>
   );
 }
+
+function IssueTechnicalMeta({ issue }: { issue: IssueDetail }) {
+  return (
+    <dl aria-label="任务技术信息" className="issue-technical-meta">
+      <div>
+        <dt>任务 ID</dt>
+        <dd title={issue.id}>{issue.id}</dd>
+      </div>
+      {issue.originId && (
+        <div>
+          <dt>{issue.originKind === "manual" ? "来源 ID" : "来源运行 ID"}</dt>
+          <dd title={issue.originId}>{issue.originId}</dd>
+        </div>
+      )}
+    </dl>
+  );
+}
 function IssuePropertiesPanel({
 
   agents,
@@ -1683,6 +1723,10 @@ function IssuePropertiesPanel({
   goals,
 
   issue,
+
+  executionOnly,
+
+  members,
 
   isUpdating,
 
@@ -1700,6 +1744,10 @@ function IssuePropertiesPanel({
 
   issue: IssueDetail;
 
+  executionOnly: boolean;
+
+  members: OrganizationHierarchyMember[];
+
   isUpdating: boolean;
 
   latestRunStatus?: HeartbeatRun["status"];
@@ -1712,9 +1760,23 @@ function IssuePropertiesPanel({
 
   const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
 
+  const membersByPrincipal = new Map(
+    members.map((member) => [`${member.principalType}:${member.principalId}`, member]),
+  );
+
+  const assigneeValue = issue.assigneeAgentId
+    ? `agent:${issue.assigneeAgentId}`
+    : issue.assigneeUserId
+      ? `user:${issue.assigneeUserId}`
+      : "";
+
+  const reviewerValue = issue.reviewerAgentId ? `agent:${issue.reviewerAgentId}` : "";
+
   const statusSelectDisabledReason = isLiveRun(latestRunStatus) ? "当前任务已有运行在执行中，运行结束后再调整阶段。" : "";
 
-  const statusSelectDisabled = isUpdating || Boolean(statusSelectDisabledReason);
+  const statusSelectDisabled = isUpdating
+    || Boolean(statusSelectDisabledReason)
+    || (executionOnly && issue.status === "in_review");
 
   return (
 
@@ -1752,7 +1814,9 @@ function IssuePropertiesPanel({
 
             {ISSUE_STATUSES.map((status) => {
 
-              const disabledReason = issueStatusOptionDisabledReason(issue, status);
+              const disabledReason = executionOnly && !HUMAN_EXECUTION_STATUSES.has(status)
+                ? "Human 负责人只能开始、继续、完成或阻塞自己的任务。"
+                : issueStatusOptionDisabledReason(issue, status);
 
               return (
 
@@ -1774,7 +1838,7 @@ function IssuePropertiesPanel({
 
           <span>优先级</span>
 
-          <select disabled={isUpdating} value={issue.priority} onChange={(event) => onUpdate({ priority: event.target.value as IssuePriority })}>
+          <select disabled={isUpdating || executionOnly} value={issue.priority} onChange={(event) => onUpdate({ priority: event.target.value as IssuePriority })}>
 
             {ISSUE_PRIORITIES.map((priority) => <option key={priority} value={priority}>{priorityLabel(priority)}</option>)}
 
@@ -1788,21 +1852,21 @@ function IssuePropertiesPanel({
 
           <select
 
-            disabled={isUpdating}
+            disabled={isUpdating || executionOnly}
 
-            value={nullableSelectValue(issue.assigneeAgentId)}
+            value={assigneeValue}
 
             onChange={(event) => {
 
-              const nextAssigneeAgentId = event.target.value || null;
+              const [principalType, principalId] = event.target.value.split(":", 2);
 
               onUpdate({
 
-                assigneeAgentId: nextAssigneeAgentId,
+                assigneeAgentId: principalType === "agent" ? principalId : null,
 
-                assigneeUserId: null,
+                assigneeUserId: principalType === "user" ? principalId : null,
 
-                ...(nextAssigneeAgentId && nextAssigneeAgentId === issue.reviewerAgentId ? { reviewerAgentId: null, reviewerUserId: null } : {}),
+                ...(event.target.value && event.target.value === reviewerValue ? { reviewerAgentId: null, reviewerUserId: null } : {}),
 
               });
 
@@ -1812,7 +1876,11 @@ function IssuePropertiesPanel({
 
             <option value="">未分配</option>
 
-            {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+            {members.filter((member) => member.status === "active").map((member) => (
+              <option key={member.id} value={`${member.principalType}:${member.principalId}`}>
+                {member.displayName}{member.principalType === "user" ? "（Human）" : ""}
+              </option>
+            ))}
 
           </select>
 
@@ -1830,26 +1898,48 @@ function IssuePropertiesPanel({
 
         )}
 
+        {issue.assigneeUserId && (
+
+          <div className="issue-property-row issue-property-link-row">
+
+            <span>Human 负责人</span>
+
+            <strong>{membersByPrincipal.get(`user:${issue.assigneeUserId}`)?.displayName ?? issue.assigneeUserId}</strong>
+
+          </div>
+
+        )}
+
         <label className="issue-property-row">
 
           <span>Reviewer</span>
 
           <select
 
-            disabled={isUpdating}
+            disabled={isUpdating || executionOnly}
 
-            value={nullableSelectValue(issue.reviewerAgentId)}
+            value={reviewerValue}
 
-            onChange={(event) => onUpdate({ reviewerAgentId: event.target.value || null, reviewerUserId: null })}
+            onChange={(event) => {
+              const reviewerAgentId = event.target.value.slice(6);
+              onUpdate({
+                reviewerAgentId: reviewerAgentId || null,
+                reviewerUserId: null,
+              });
+            }}
 
           >
 
             <option value="">不设置</option>
 
-            {agents.map((agent) => (
-
-              <option disabled={agent.id === issue.assigneeAgentId} key={agent.id} value={agent.id}>{agent.name}</option>
-))}
+            {members.filter((member) => member.status === "active" && member.principalType === "agent").map((member) => {
+              const value = `${member.principalType}:${member.principalId}`;
+              return (
+                <option disabled={value === assigneeValue} key={member.id} value={value}>
+                  {member.displayName}
+                </option>
+              );
+            })}
 
           </select>
 
@@ -1867,13 +1957,25 @@ function IssuePropertiesPanel({
 
         )}
 
+        {issue.reviewerUserId && (
+
+          <div className="issue-property-row issue-property-link-row">
+
+            <span>Human Reviewer</span>
+
+            <strong>{membersByPrincipal.get(`user:${issue.reviewerUserId}`)?.displayName ?? issue.reviewerUserId}</strong>
+
+          </div>
+
+        )}
+
         <label className="issue-property-row">
 
           <span>项目</span>
 
           <select
 
-            disabled={isUpdating}
+            disabled={isUpdating || executionOnly}
 
             value={nullableSelectValue(issue.projectId)}
 
@@ -1895,7 +1997,7 @@ function IssuePropertiesPanel({
 
           <select
 
-            disabled={isUpdating}
+            disabled={isUpdating || executionOnly}
 
             value={nullableSelectValue(issue.goalId)}
 
@@ -3868,6 +3970,14 @@ export function IssuePage() {
 
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
 
+  const hierarchy = useQuery({ queryKey: ["organization-hierarchy", orgId], queryFn: () => accessApi.hierarchy(orgId) });
+
+  const session = useQuery({
+    queryKey: ["auth-session"],
+    queryFn: authApi.session,
+    staleTime: AUTH_SESSION_STALE_TIME_MS,
+  });
+
   const goals = useQuery({ queryKey: ["goals", orgId], queryFn: () => goalsApi.list(orgId) });
 
   const issue = useQuery({ queryKey: ["issue", issueId], queryFn: () => issuesApi.get(issueId) });
@@ -4573,7 +4683,29 @@ export function IssuePage() {
 
   const agentList = Array.isArray(agents.data) ? agents.data : [];
 
+  const hierarchyMembers = Array.isArray(hierarchy.data) ? hierarchy.data : [];
+
+  const memberList = organizationMembersWithAgentFallback(hierarchyMembers, agentList, orgId);
+
+  const currentUserId = session.data?.user?.id ?? "";
+
+  const isAssignedHuman = Boolean(issue.data?.assigneeUserId);
+
+  const isCurrentHumanAssignee = Boolean(
+    currentUserId && issue.data?.assigneeUserId === currentUserId,
+  );
+
+  const currentMember = memberList.find(
+    (member) => member.principalType === "user" && member.principalId === currentUserId,
+  );
+
+  const humanExecutionOnly = isCurrentHumanAssignee && currentMember?.role !== "owner";
+
   const agentsById = new Map(agentList.map((agent) => [agent.id, agent]));
+
+  const membersByPrincipal = new Map(
+    memberList.map((member) => [`${member.principalType}:${member.principalId}`, member]),
+  );
 
   const mentionCandidates = mentionQuery
 
@@ -4685,9 +4817,13 @@ export function IssuePage() {
 
   return (
 
-    <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
+    <IssuesWorkspace contentClassName="org-content-full tertiary-page-content issue-detail-content" orgId={orgId}>
+
+      <TertiaryPageShell>
 
       {agents.error && <ErrorNotice error={agents.error} />}
+
+      {hierarchy.error && <ErrorNotice error={hierarchy.error} />}
 
       {goals.error && <ErrorNotice error={goals.error} />}
 
@@ -4697,87 +4833,84 @@ export function IssuePage() {
 
       {issue.data && (
 
-        <div className="issue-detail-layout">
+        <>
 
-          <header className="issue-detail-top">
-
-            <nav aria-label="任务导航" className="issue-breadcrumb">
-
-              <Link to={`/orgs/${orgId}/issues`}>任务编号</Link>
-              <span>/</span>
-
-              <span>{issueDisplayId(issue.data)}</span>
-
-            </nav>
-
-            <div className="issue-detail-title-block">
-
-              <div className="issue-detail-kicker">
-                <IssueIdStrip issue={issue.data} />
-                {latestRun && (
-                  <StatusPill status={latestRun.status}>
-                    {latestRunBadgeLabel(latestRun)}结果：{latestRunStatusText(latestRun)}
-                  </StatusPill>
-                )}
-              </div>
-
-              <div className="issue-title-row">
-
-                <h1>{issue.data.title}</h1>
-
-                <div className="issue-header-actions">
-
-                  <button
-
-                    aria-disabled={executeBlockReason ? "true" : undefined}
-
-                    className={executeBlockReason ? "is-disabled" : undefined}
-
-                    disabled={executeIssue.isPending}
-
-                    title={executeBlockReason || (latestRunCanReexecute ? "重新交给负责人启动一次运行" : "交给负责人启动一次运行")}
-
-                    type="button"
-
-                    onClick={executeCurrentIssue}
-
-                  >
-
-                    {executeButtonLabel}
-
-                  </button>
-
-                  <button
-
-                    className="secondary small-button"
-
-                    disabled={checkoutIssue.isPending || !issue.data.assigneeAgentId}
-
-                    title={issue.data.assigneeAgentId ? "由当前负责人签出任务" : "请先分配负责人"}
-
-                    type="button"
-
-                    onClick={() => checkoutIssue.mutate()}
-
-                  >
-
-                    签出任务
-
-                  </button>
-
-                  <button className="secondary small-button" type="button" onClick={() => navigator.clipboard?.writeText(issueDisplayId(issue.data))}>
-
+          <TertiaryPageHeader
+            actions={<>
+              {!isAssignedHuman && <button
+                aria-disabled={executeBlockReason ? "true" : undefined}
+                className={executeBlockReason ? "is-disabled" : undefined}
+                disabled={executeIssue.isPending}
+                title={executeBlockReason || (latestRunCanReexecute ? "重新交给负责人启动一次运行" : "交给负责人启动一次运行")}
+                type="button"
+                onClick={executeCurrentIssue}
+              >
+                {executeButtonLabel}
+              </button>}
+              {!isAssignedHuman && <button
+                className="secondary small-button"
+                disabled={checkoutIssue.isPending || !issue.data.assigneeAgentId}
+                title={issue.data.assigneeAgentId ? "由当前负责人签出任务" : "请先分配负责人"}
+                type="button"
+                onClick={() => checkoutIssue.mutate()}
+              >
+                签出任务
+              </button>}
+              {isAssignedHuman && isCurrentHumanAssignee && issue.data.status !== "done" && issue.data.status !== "cancelled" && (
+                <button
+                  disabled={updateIssue.isPending || issue.data.status === "in_review"}
+                  title={issue.data.status === "in_review" ? "任务正在等待评审" : undefined}
+                  type="button"
+                  onClick={() => updateIssue.mutate({
+                    status: issue.data.status === "in_progress" ? "done" : "in_progress",
+                  })}
+                >
+                  {issue.data.status === "in_progress" ? "提交完成" : "开始处理"}
+                </button>
+              )}
+              {isAssignedHuman && isCurrentHumanAssignee && ["todo", "in_progress"].includes(issue.data.status) && (
+                <button
+                  className="secondary small-button"
+                  disabled={updateIssue.isPending}
+                  type="button"
+                  onClick={() => updateIssue.mutate({ status: "blocked" })}
+                >
+                  标记阻塞
+                </button>
+              )}
+              {isAssignedHuman && !isCurrentHumanAssignee && <Badge>等待 Human 负责人处理</Badge>}
+              <details className="issue-header-more">
+                <summary className="button secondary small-button">更多</summary>
+                <div className="issue-header-more-menu" role="menu">
+                  <button role="menuitem" type="button" onClick={() => navigator.clipboard?.writeText(issueDisplayId(issue.data))}>
                     复制 ID
-
                   </button>
-
-                  <Link className="button secondary small-button" to={`/orgs/${orgId}/chats`}>聊天</Link>
-
+                  <Link className="button" role="menuitem" to={`/orgs/${orgId}/chats`}>聊天</Link>
                 </div>
+              </details>
+            </>}
+            eyebrow={<><Link to={`/orgs/${orgId}/issues`}>Issues</Link><span>/</span><span>{issueDisplayId(issue.data)}</span></>}
+            supporting={<div className="issue-detail-kicker">
+              <IssueIdStrip issue={issue.data} />
+              {latestRun && (
+                <StatusPill status={latestRun.status}>
+                  {latestRunBadgeLabel(latestRun)}结果：{latestRunStatusText(latestRun)}
+                </StatusPill>
+              )}
+            </div>}
+            title={issue.data.title}
+            variant="contained"
+          />
 
-              </div>
+          <TertiaryPageViewport className="issue-detail-viewport">
 
-            </div>
+            <div className="issue-detail-layout">
+
+          <main className="issue-detail-main">
+
+          <div className="issue-detail-context">
+
+            <IssueTechnicalMeta issue={issue.data} />
 
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
 
@@ -4836,9 +4969,7 @@ export function IssuePage() {
 
             {passiveFollowup.error && <ErrorNotice error={passiveFollowup.error} />}
 
-          </header>
-
-          <main className="issue-detail-main">
+          </div>
 
             <p className="issue-description">{issue.data.description || "暂无描述"}</p>
 
@@ -4909,11 +5040,27 @@ export function IssuePage() {
 
                       <strong>{child.title}</strong>
 
+                      <span className="issue-subtask-assignee">
+
+                        <span>执行者</span>
+
+                        <strong>{issueAssigneeLabel(child, membersByPrincipal, agentsById)}</strong>
+
+                      </span>
+
+                      <span className="issue-subtask-product">
+
+                        <span>产物</span>
+
+                        <strong title={childPrimaryProductTitle(child) ?? undefined}>
+                          {childPrimaryProductTitle(child) ?? "—"}
+                        </strong>
+
+                      </span>
+
                       <span className="issue-subtask-meta">
 
                         <Badge>{child.status}</Badge>
-
-                        {childPrimaryProductTitle(child) && <Badge>产物 {childPrimaryProductTitle(child)}</Badge>}
 
                         <Badge>{child.priority}</Badge>
 
@@ -5482,9 +5629,13 @@ export function IssuePage() {
 
                 agents={agentList}
 
+                executionOnly={humanExecutionOnly}
+
                 goals={goalList}
 
                 issue={issue.data}
+
+                members={memberList}
 
                 isUpdating={updateIssue.isPending}
 
@@ -5504,25 +5655,24 @@ export function IssuePage() {
 
           </aside>
 
-        </div>
+            </div>
+
+          </TertiaryPageViewport>
+
+        </>
 
       )}
 
       {!issue.data && (
 
-        <header className="page-header">
-
-          <div>
-
-            <Link className="back-link" to={`/orgs/${orgId}/issues`}>返回任务</Link>
-
-            <h1>载入中...</h1>
-
-          </div>
-
-        </header>
+        <TertiaryPageHeader
+          eyebrow={<><Link to={`/orgs/${orgId}/issues`}>Issues</Link><span> / Issue</span></>}
+          title="载入中..."
+        />
 
       )}
+
+      </TertiaryPageShell>
 
     </IssuesWorkspace>
 

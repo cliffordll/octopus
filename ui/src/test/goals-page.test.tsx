@@ -76,6 +76,15 @@ it("lists goals and creates a goal from a dialog", async () => {
   const fetchMock = stubGoalFetch();
 
   renderApp("/orgs/org-1/goals");
+  const goalsHeader = (await screen.findByRole("heading", { name: "目标", level: 1 })).closest("header")!;
+  expect(goalsHeader).toHaveClass("page-header");
+  expect(goalsHeader).not.toHaveClass("org-resource-hero");
+  expect(goalsHeader.closest(".org-content")).toHaveClass("org-content-full", "tertiary-page-content");
+  expect(goalsHeader.parentElement).toHaveClass("tertiary-page-shell");
+  expect(goalsHeader.nextElementSibling).toHaveClass("tertiary-page-viewport");
+  expect(within(goalsHeader).getByText("Goals")).toHaveClass("eyebrow");
+  expect(within(goalsHeader).getByRole("button", { name: "创建目标" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "目标列表", level: 2 }).parentElement?.parentElement).toHaveClass("org-section-header");
   const organizationNavigation = screen.getByRole("navigation", { name: "组织导航" });
   expect(await within(organizationNavigation).findByRole("link", { name: "目标" })).toHaveAttribute(
     "href",
@@ -87,14 +96,21 @@ it("lists goals and creates a goal from a dialog", async () => {
     "/orgs/org-1/goals/goal-1",
   );
 
-  expect(screen.queryByRole("dialog", { name: "New Goal" })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "New Goal" }));
-  const dialog = within(screen.getByRole("dialog", { name: "New Goal" }));
-  await userEvent.type(dialog.getByLabelText("Goal title"), "兼容目标");
-  await userEvent.selectOptions(dialog.getByLabelText("Level"), "team");
-  await userEvent.selectOptions(dialog.getByLabelText("Status"), "planned");
-  await userEvent.selectOptions(dialog.getByLabelText("Owner"), "agent-1");
-  await userEvent.click(dialog.getByRole("button", { name: "Create goal" }));
+  expect(screen.queryByRole("dialog", { name: "创建目标" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "创建目标" }));
+  await userEvent.click(within(screen.getByRole("dialog", { name: "创建目标" })).getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("dialog", { name: "创建目标" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "创建目标" }));
+  const dialog = within(screen.getByRole("dialog", { name: "创建目标" }));
+  await userEvent.type(dialog.getByLabelText("目标名称"), "兼容目标");
+  expect(dialog.getByLabelText("描述")).toBeInTheDocument();
+  expect(dialog.getByLabelText("上级目标")).toBeInTheDocument();
+  expect(dialog.getByRole("option", { name: "团队" })).toHaveValue("team");
+  expect(dialog.getByRole("option", { name: "已计划" })).toHaveValue("planned");
+  await userEvent.selectOptions(dialog.getByLabelText("层级"), "team");
+  await userEvent.selectOptions(dialog.getByLabelText("状态"), "planned");
+  await userEvent.selectOptions(dialog.getByLabelText("负责人"), "agent-1");
+  await userEvent.click(dialog.getByRole("button", { name: "创建", exact: true }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/goals",
     expect.objectContaining({

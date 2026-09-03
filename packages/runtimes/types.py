@@ -47,6 +47,7 @@ class RuntimeEnvironmentTestResult:
 
 class RuntimeAdapterProtocol(Protocol):
     type: str
+    supports_local_agent_jwt: bool
 
     async def execute(
         self, context: RuntimeExecutionContext

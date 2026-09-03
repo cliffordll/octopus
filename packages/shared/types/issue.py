@@ -20,6 +20,7 @@ class IssueListItem(TypedDict):
     priority: IssuePriority
     projectId: str | None
     goalId: str | None
+    parentId: str | None
     assigneeAgentId: str | None
     assigneeUserId: str | None
     createdByAgentId: str | None
@@ -70,7 +71,6 @@ class IssueDetail(IssueListItem):
     reviewerUserId: str | None
     projectId: str | None
     goalId: str | None
-    parentId: str | None
     originKind: IssueOriginKind
     originId: str | None
     originRunId: str | None

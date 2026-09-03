@@ -12,6 +12,8 @@ from packages.database.clients.cleanup import (
 )
 from packages.database.queries.issues import get_issue_by_id
 from packages.shared.types.heartbeat import HeartbeatRun
+from server.access import AccessPolicyService
+from server.identity import IdentityContext
 
 
 class RunExecutionService:
@@ -23,10 +25,12 @@ class RunExecutionService:
         *,
         run_id: str,
         agent_id: str,
+        identity: IdentityContext,
     ) -> None:
         self._session_factory = session_factory
         self.run_id = run_id
         self.agent_id = agent_id
+        self._identity = identity
 
     async def run(self) -> str | None:
         # Local imports keep the execution service independent from the
@@ -39,6 +43,18 @@ class RunExecutionService:
         )
 
         session = self._session_factory()
+        try:
+            identity = self._identity
+            if identity.entity_id != self.run_id:
+                raise ValueError("Run execution identity is scoped to another Run")
+            if identity.org_id is None:
+                raise ValueError("Run execution identity must be organization scoped")
+            AccessPolicyService().require_permission(
+                identity, identity.org_id, "runs:dispatch"
+            )
+        except BaseException:
+            await close_session_shielded(session)
+            raise
         service = HeartbeatService(
             session,
             commit_process_metadata=True,

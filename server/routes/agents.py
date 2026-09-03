@@ -112,14 +112,25 @@ from packages.shared.validators.heartbeat import validate_wake_agent
 from ..dependencies.access import (
     assert_organization_access,
     require_actor_identity,
-    require_board_access,
+    require_root_access,
     require_organization_access,
 )
 from ..dependencies.agent_instructions import get_agent_instructions_service
+from ..dependencies.agent_access import (
+    AgentOrganizationAccess,
+    get_agent_organization_access,
+    require_agent_manage,
+    require_agent_skills_manage,
+)
 from ..dependencies.agent_memory import get_agent_memory_service
 from ..dependencies.agents import get_agent_service
 from ..dependencies.database import _close_session
 from ..dependencies.heartbeat import get_heartbeat_service
+from ..dependencies.heartbeat_access import (
+    HeartbeatRunOrganizationAccess,
+    require_heartbeat_run_manage,
+)
+from ..dependencies.identity import require_organization_permission
 from ..dependencies.workspaces import get_workspace_service
 from ..services.agents import AgentConflictError, AgentService
 from ..services.agent_instructions import AgentInstructionsService
@@ -133,6 +144,7 @@ from ..services.run_admission import DirectRunCreationDenied, RunAdmissionPolicy
 from ..services.workspaces import WorkspaceService
 
 router = APIRouter(tags=["agents"])
+require_agents_create_permission = require_organization_permission("agents:create")
 
 
 def _schedule_dispatch(request: Request, agent_id: str) -> None:
@@ -174,7 +186,7 @@ async def create_agent_route(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: object = Depends(require_agents_create_permission),
     service: AgentService = Depends(get_agent_service),
 ) -> Agent:
     try:
@@ -194,7 +206,7 @@ async def hire_agent_route(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_agents_create_permission),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentHireResult:
     try:
@@ -216,7 +228,7 @@ async def hire_agent_route(
 @router.get(ORG_AGENT_NAME_SUGGESTION_PATH)
 async def suggest_agent_name_route(
     orgId: str,
-    _: None = Depends(require_board_access),
+    _: None = Depends(require_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> dict[str, str]:
     return {"name": await service.suggest_name(orgId)}
@@ -282,7 +294,7 @@ async def update_agent_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> Agent:
     await _get_agent_or_404(id, request=request, service=service)
@@ -341,7 +353,7 @@ async def _lifecycle_action(
 async def archive_agent_route(
     id: str,
     request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> Agent:
     return await _lifecycle_action(
@@ -353,7 +365,7 @@ async def archive_agent_route(
 async def pause_agent_route(
     id: str,
     request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> Agent:
     return await _lifecycle_action(id, action="pause", request=request, service=service)
@@ -363,7 +375,7 @@ async def pause_agent_route(
 async def resume_agent_route(
     id: str,
     request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> Agent:
@@ -380,7 +392,7 @@ async def resume_agent_route(
 async def terminate_agent_route(
     id: str,
     request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> Agent:
     return await _lifecycle_action(
@@ -391,11 +403,9 @@ async def terminate_agent_route(
 @router.get(AGENT_CONFIGURATION_PATH)
 async def get_agent_configuration_route(
     id: str,
-    request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(get_agent_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentConfiguration:
-    await _get_agent_or_404(id, request=request, service=service)
     configuration = await service.get_configuration(id)
     if configuration is None:
         raise HTTPException(
@@ -409,6 +419,7 @@ async def update_agent_instructions_path_route(
     request: Request,
     id: str,
     body: dict[str, Any] = Body(...),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     agent_service: AgentService = Depends(get_agent_service),
     instructions_service: AgentInstructionsService = Depends(
         get_agent_instructions_service
@@ -458,6 +469,7 @@ async def update_agent_instructions_bundle_route(
     request: Request,
     id: str,
     body: dict[str, Any] = Body(...),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     agent_service: AgentService = Depends(get_agent_service),
     instructions_service: AgentInstructionsService = Depends(
         get_agent_instructions_service
@@ -522,6 +534,7 @@ async def upsert_agent_instructions_file_route(
     request: Request,
     id: str,
     body: dict[str, Any] = Body(...),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     agent_service: AgentService = Depends(get_agent_service),
     instructions_service: AgentInstructionsService = Depends(
         get_agent_instructions_service
@@ -553,6 +566,7 @@ async def delete_agent_instructions_file_route(
     request: Request,
     id: str,
     path: str = "",
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     agent_service: AgentService = Depends(get_agent_service),
     instructions_service: AgentInstructionsService = Depends(
         get_agent_instructions_service
@@ -646,6 +660,7 @@ async def upsert_agent_memory_file_route(
     request: Request,
     id: str,
     body: dict[str, Any] = Body(...),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     agent_service: AgentService = Depends(get_agent_service),
     memory_service: AgentMemoryService = Depends(get_agent_memory_service),
 ) -> AgentMemoryFileDetail:
@@ -678,6 +693,7 @@ async def delete_agent_memory_file_route(
     id: str,
     layer: str = "memory",
     path: str = "",
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     agent_service: AgentService = Depends(get_agent_service),
     memory_service: AgentMemoryService = Depends(get_agent_memory_service),
 ) -> AgentMemoryFileList:
@@ -709,7 +725,7 @@ async def delete_agent_memory_file_route(
 @router.get(ORG_AGENT_CONFIGURATIONS_PATH)
 async def list_agent_configurations_route(
     orgId: str,
-    _: None = Depends(require_board_access),
+    _: None = Depends(require_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> list[AgentConfiguration]:
     return await service.list_configurations_for_org(orgId)
@@ -765,7 +781,7 @@ async def test_adapter_environment_route(
     orgId: str,
     type: str,
     body: dict[str, Any] = Body(default={}),
-    _: None = Depends(require_board_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
 ) -> dict[str, Any]:
     try:
         payload = validate_test_agent_runtime_environment(body)
@@ -786,11 +802,9 @@ async def test_adapter_environment_route(
 @router.get(AGENT_CONFIG_REVISIONS_PATH)
 async def list_agent_config_revisions_route(
     id: str,
-    request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(get_agent_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> list[AgentConfigRevision]:
-    await _get_agent_or_404(id, request=request, service=service)
     return await service.list_config_revisions(id)
 
 
@@ -798,11 +812,9 @@ async def list_agent_config_revisions_route(
 async def get_agent_config_revision_route(
     id: str,
     revisionId: str,
-    request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(get_agent_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentConfigRevision:
-    await _get_agent_or_404(id, request=request, service=service)
     revision = await service.get_config_revision(id, revisionId)
     if revision is None:
         raise HTTPException(
@@ -816,7 +828,7 @@ async def rollback_agent_config_revision_route(
     id: str,
     revisionId: str,
     request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> Agent:
     await _get_agent_or_404(id, request=request, service=service)
@@ -839,11 +851,9 @@ async def rollback_agent_config_revision_route(
 @router.get(AGENT_RUNTIME_STATE_PATH)
 async def get_agent_runtime_state_route(
     id: str,
-    request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(get_agent_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentRuntimeState:
-    await _get_agent_or_404(id, request=request, service=service)
     state_data = await service.get_runtime_state(id)
     if state_data is None:
         raise HTTPException(
@@ -855,11 +865,9 @@ async def get_agent_runtime_state_route(
 @router.get(AGENT_TASK_SESSIONS_PATH)
 async def list_agent_task_sessions_route(
     id: str,
-    request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(get_agent_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> list[AgentTaskSession]:
-    await _get_agent_or_404(id, request=request, service=service)
     return await service.list_task_sessions(id)
 
 
@@ -868,7 +876,7 @@ async def reset_agent_runtime_session_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> ResetAgentSessionResult:
     await _get_agent_or_404(id, request=request, service=service)
@@ -892,11 +900,9 @@ async def reset_agent_runtime_session_route(
 @router.get(AGENT_SKILLS_PATH)
 async def get_agent_skills_route(
     id: str,
-    request: Request,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(get_agent_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentSkillSnapshot:
-    await _get_agent_or_404(id, request=request, service=service)
     snapshot = await service.get_skill_snapshot(id)
     if snapshot is None:
         raise HTTPException(
@@ -910,10 +916,9 @@ async def sync_agent_skills_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(default={}),
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_skills_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentSkillSnapshot:
-    await _get_agent_or_404(id, request=request, service=service)
     try:
         payload = validate_agent_skills_sync(body)
     except ValueError as exc:
@@ -939,10 +944,9 @@ async def enable_agent_skills_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(default={}),
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_skills_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentSkillSnapshot:
-    await _get_agent_or_404(id, request=request, service=service)
     try:
         payload = validate_agent_skills_enable(body)
     except ValueError as exc:
@@ -968,10 +972,9 @@ async def create_agent_private_skill_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(require_agent_skills_manage),
     service: AgentService = Depends(get_agent_service),
 ) -> dict[str, Any]:
-    await _get_agent_or_404(id, request=request, service=service)
     try:
         payload = validate_agent_private_skill(body)
     except ValueError as exc:
@@ -1006,10 +1009,9 @@ async def get_agent_skills_analytics_route(
     id: str,
     request: Request,
     windowDays: int = 30,
-    _: None = Depends(require_board_access),
+    _: AgentOrganizationAccess = Depends(get_agent_organization_access),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentSkillAnalytics:
-    await _get_agent_or_404(id, request=request, service=service)
     analytics = await service.get_skill_analytics(id, window_days=windowDays)
     if analytics is None:
         raise HTTPException(
@@ -1020,7 +1022,7 @@ async def get_agent_skills_analytics_route(
 
 @router.get(INSTANCE_SCHEDULER_HEARTBEATS_PATH)
 async def list_instance_scheduler_heartbeats_route(
-    _: None = Depends(require_board_access),
+    _: None = Depends(require_root_access),
     service: AgentService = Depends(get_agent_service),
 ) -> list[InstanceSchedulerHeartbeatAgent]:
     return await service.list_instance_scheduler_heartbeats()
@@ -1086,6 +1088,7 @@ async def wake_agent_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(default={}),
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> HeartbeatRun | dict[str, str]:
@@ -1103,6 +1106,7 @@ async def wake_agent_route(
 async def invoke_agent_heartbeat_route(
     id: str,
     request: Request,
+    _: AgentOrganizationAccess = Depends(require_agent_manage),
     service: AgentService = Depends(get_agent_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> HeartbeatRun | dict[str, str]:
@@ -1278,15 +1282,9 @@ async def list_heartbeat_run_workspace_operations_route(
 async def cancel_heartbeat_run_route(
     runId: str,
     request: Request,
-    _: None = Depends(require_board_access),
+    _access: HeartbeatRunOrganizationAccess = Depends(require_heartbeat_run_manage),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> HeartbeatRun:
-    existing = await heartbeat.get(runId)
-    if existing is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Heartbeat run not found"
-        )
-    assert_organization_access(request, existing["orgId"])
     run = await heartbeat.cancel_run(runId)
     assert run is not None
     actor = require_actor_identity(request)
@@ -1303,15 +1301,9 @@ async def cancel_heartbeat_run_route(
 async def retry_heartbeat_run_route(
     runId: str,
     request: Request,
-    _: None = Depends(require_board_access),
+    _access: HeartbeatRunOrganizationAccess = Depends(require_heartbeat_run_manage),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> HeartbeatRun:
-    original = await heartbeat.get(runId)
-    if original is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Heartbeat run not found"
-        )
-    assert_organization_access(request, original["orgId"])
     actor = require_actor_identity(request)
     try:
         run = await heartbeat.retry_run(

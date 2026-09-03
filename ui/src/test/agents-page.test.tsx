@@ -46,6 +46,14 @@ it("opens the first agent by default and creates one from the new agent flow", a
 
   renderApp("/orgs/org-1/agents");
   expect(await screen.findByRole("heading", { name: "Builder" })).toBeInTheDocument();
+  expect(screen.getByText("Octopus", { exact: true })).toBeInTheDocument();
+  expect(screen.queryByText("Control plane", { exact: true })).not.toBeInTheDocument();
+  for (const [name, title] of [["快速创建", "创建"], ["设置", "设置"]]) {
+    const button = screen.getByRole("button", { name, exact: true });
+    expect(button).toHaveAttribute("title", title);
+    expect(button.textContent).toBe("");
+    expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  }
   expect(screen.getByRole("navigation", { name: "智能体详情导航" })).toBeInTheDocument();
   expect(screen.queryByLabelText("状态筛选")).not.toBeInTheDocument();
   const primaryNavigation = within(screen.getByRole("navigation", { name: "主导航" }));
@@ -60,13 +68,36 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(primaryNavigation.getByRole("link", { name: "智能体" })).toHaveAttribute("href", "/orgs/org-1/agents");
   expect(primaryNavigation.getByRole("link", { name: "组织" })).toHaveAttribute("href", "/orgs/org-1/structure");
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "当前用户：Test User" }));
+  const accountMenu = within(screen.getByRole("menu", { name: "账号菜单" }));
+  expect(accountMenu.getByText("Test User")).toBeInTheDocument();
+  expect(accountMenu.getByText("test@example.com")).toBeInTheDocument();
+  expect(accountMenu.getByText("本地 Session")).toBeInTheDocument();
+  await userEvent.click(accountMenu.getByRole("menuitem", { name: "账户设置" }));
+  const accountSettings = within(screen.getByRole("dialog", { name: "设置" }));
+  expect(accountSettings.getByRole("heading", { name: "账户" })).toBeInTheDocument();
+  await userEvent.click(accountSettings.getByRole("button", { name: "关闭设置" }));
   const agentNavigation = within(screen.getByRole("navigation", { name: "智能体导航" }));
-  expect(agentNavigation.getByRole("heading", { name: "团队" })).toBeInTheDocument();
+  expect(agentNavigation.queryByRole("heading", { name: "团队" })).not.toBeInTheDocument();
+  expect(agentNavigation.getByRole("heading", { name: "智能体" })).toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { name: "团队", level: 2 })).toHaveLength(1);
   expect(agentNavigation.queryByRole("link", { name: /新建智能体/ })).not.toBeInTheDocument();
   expect(
     agentNavigation.getByRole("link", { name: /Builder/ }),
   ).toHaveAttribute("href", "/orgs/org-1/agents/agent-1");
-  await userEvent.click(screen.getByRole("button", { name: "组织菜单" }));
+  const agentEntry = agentNavigation.getByRole("link", { name: /Builder/ });
+  expect(agentEntry.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  expect(agentEntry.querySelector(".context-entry-icon")?.textContent).toBe("");
+  expect(agentEntry).toHaveTextContent("工程");
+  expect(agentEntry).toHaveClass("active");
+  expect(screen.getByRole("heading", { name: "Builder" }).closest("header")!.querySelector(".agent-avatar-lg")).toBeNull();
+  expect(screen.queryByRole("link", { name: "返回智能体列表" })).not.toBeInTheDocument();
+  const organizationTrigger = screen.getByRole("button", { name: "组织菜单" });
+  expect(organizationTrigger).toHaveAttribute("title", "核心团队 · 切换组织");
+  expect(organizationTrigger.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  expect(organizationTrigger).toHaveAttribute("aria-expanded", "false");
+  await userEvent.click(organizationTrigger);
+  expect(organizationTrigger).toHaveAttribute("aria-expanded", "true");
   const organizationMenu = within(screen.getByRole("navigation", { name: "组织切换菜单" }));
   expect(organizationMenu.getByRole("link", { name: "组织设置" })).toHaveAttribute(
     "href",
@@ -78,27 +109,37 @@ it("opens the first agent by default and creates one from the new agent flow", a
   ).toHaveAttribute("href", "/orgs/org-2/agents");
 
   await userEvent.click(primaryNavigation.getByRole("button", { name: "快速创建" }));
+  expect(primaryNavigation.getByRole("button", { name: "快速创建" })).toHaveAttribute("aria-expanded", "true");
+  const createMenu = within(screen.getByRole("navigation", { name: "快速创建菜单" }));
+  for (const entry of [...createMenu.getAllByRole("link"), ...createMenu.getAllByRole("button")]) {
+    expect(entry.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(entry.textContent?.trim()).toMatch(/^创建(新聊天|新任务|智能体|新项目)$/);
+    expect(entry.querySelector(".context-entry-icon")).toBeNull();
+  }
+  expect(createMenu.getByRole("link", { name: "创建新聊天" })).toHaveAttribute("href", "/orgs/org-1/chats");
+  expect(createMenu.getByRole("link", { name: "创建新任务" })).toHaveAttribute("href", "/orgs/org-1/issues?create=1");
   await userEvent.click(screen.getByRole("button", { name: "创建智能体" }));
-  await userEvent.click(await screen.findByRole("button", { name: "使用名称建议" }));
-  expect(screen.getByLabelText(/智能体名称/)).toHaveValue("Suggested Agent");
-  await userEvent.clear(screen.getByLabelText(/智能体名称/));
-  await userEvent.type(await screen.findByLabelText(/智能体名称/), "Reviewer");
-  await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
-  await userEvent.selectOptions(screen.getByLabelText("角色"), "cto");
-  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "hermes_local" })).not.toBeInTheDocument();
-  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "gemini_local" })).not.toBeInTheDocument();
-  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "cursor" })).not.toBeInTheDocument();
-  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "pi_local" })).not.toBeInTheDocument();
-  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "codex_local" })).not.toBeInTheDocument();
-  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "http");
-  await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
-  await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
-  await userEvent.type(screen.getByLabelText("月度预算（美元）"), "50");
-  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
-  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"provider/model"}' } });
-  fireEvent.change(screen.getByLabelText("Metadata"), { target: { value: '{"team":"runtime"}' } });
-  await userEvent.type(screen.getByLabelText("期望技能"), "review,debug");
-  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+  const createAgentDialog = within(await screen.findByRole("dialog", { name: "创建智能体" }));
+  await userEvent.click(createAgentDialog.getByRole("button", { name: "使用名称建议" }));
+  expect(createAgentDialog.getByLabelText(/智能体名称/)).toHaveValue("Suggested Agent");
+  await userEvent.clear(createAgentDialog.getByLabelText(/智能体名称/));
+  await userEvent.type(createAgentDialog.getByLabelText(/智能体名称/), "Reviewer");
+  await userEvent.selectOptions(createAgentDialog.getByLabelText("角色"), "qa");
+  await userEvent.selectOptions(createAgentDialog.getByLabelText("角色"), "cto");
+  expect(within(createAgentDialog.getByLabelText("Runtime")).queryByRole("option", { name: "hermes_local" })).not.toBeInTheDocument();
+  expect(within(createAgentDialog.getByLabelText("Runtime")).queryByRole("option", { name: "gemini_local" })).not.toBeInTheDocument();
+  expect(within(createAgentDialog.getByLabelText("Runtime")).queryByRole("option", { name: "cursor" })).not.toBeInTheDocument();
+  expect(within(createAgentDialog.getByLabelText("Runtime")).queryByRole("option", { name: "pi_local" })).not.toBeInTheDocument();
+  expect(within(createAgentDialog.getByLabelText("Runtime")).queryByRole("option", { name: "codex_local" })).not.toBeInTheDocument();
+  await userEvent.selectOptions(createAgentDialog.getByLabelText("Runtime"), "http");
+  await userEvent.type(createAgentDialog.getByLabelText("标题"), "Runtime owner");
+  await userEvent.type(createAgentDialog.getByLabelText("能力说明"), "Own runtime rollout");
+  await userEvent.type(createAgentDialog.getByLabelText("月度预算（美元）"), "50");
+  await userEvent.click(createAgentDialog.getByRole("button", { name: "高级参数" }));
+  fireEvent.change(createAgentDialog.getByLabelText("运行时 JSON"), { target: { value: '{"model":"provider/model"}' } });
+  fireEvent.change(createAgentDialog.getByLabelText("Metadata"), { target: { value: '{"team":"runtime"}' } });
+  expect(createAgentDialog.queryByLabelText("期望技能")).not.toBeInTheDocument();
+  await userEvent.click(createAgentDialog.getByRole("button", { name: "新建智能体" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/agent-hires",
@@ -113,7 +154,6 @@ it("opens the first agent by default and creates one from the new agent flow", a
         agentRuntimeConfig: { model: "provider/model" },
         budgetMonthlyCents: 5000,
         metadata: { team: "runtime" },
-        desiredSkills: ["review", "debug"],
       }),
     }),
   );
@@ -133,6 +173,9 @@ it("creates the first agent as the organization CEO", async () => {
     if (path === "/api/orgs/org-empty/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "Founder" });
     }
+    if (path === "/api/orgs/org-empty/adapters/codex_local/models" && init?.method === "GET") {
+      return respond([{ id: "gpt-5", label: "GPT-5" }]);
+    }
     if (path === "/api/orgs/org-empty/agent-hires" && init?.method === "POST") {
       return respond({ agent: { id: "agent-ceo", name: "Founder", role: "ceo", status: "idle" }, approval: null }, 201);
     }
@@ -146,7 +189,7 @@ it("creates the first agent as the organization CEO", async () => {
 
   await userEvent.type(screen.getByLabelText("智能体名称"), "Founder");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
-  await userEvent.type(await screen.findByLabelText("模型配置"), "openai/gpt-5");
+  await userEvent.selectOptions(await screen.findByLabelText("模型配置"), "openai/gpt-5");
   await userEvent.click(screen.getByRole("button", { name: "创建 CEO" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -189,6 +232,7 @@ it("lets the server name a hired agent when the name is blank", async () => {
       method: "POST",
       body: JSON.stringify({
         role: "qa",
+        reportsTo: "agent-ceo",
         agentRuntimeType: "process",
         agentRuntimeConfig: {},
       }),
@@ -273,12 +317,20 @@ it("builds openclaw gateway config from dedicated runtime fields", async () => {
   renderApp("/orgs/org-1/agents/new");
   await userEvent.type(await screen.findByLabelText(/智能体名称/), "OpenClaw Agent");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "openclaw_gateway");
-  expect(screen.getByText("使用推荐默认配置")).toBeInTheDocument();
-  expect(screen.queryByLabelText("Gateway URL")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
-  await userEvent.type(await screen.findByLabelText("Gateway URL"), "wss://gateway.example/ws");
-  await userEvent.type(screen.getByLabelText("Auth token"), "secret-token");
-  await userEvent.selectOptions(screen.getByLabelText("Session key strategy"), "issue");
+  expect(screen.getByText("需配置网关地址 · 默认按任务建立会话 · 超时 120 秒")).toBeInTheDocument();
+  expect(screen.queryByLabelText("网关地址")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "高级参数" }));
+  const gatewayUrl = await screen.findByLabelText("网关地址");
+  expect(gatewayUrl.closest(".runtime-config-fields")).toHaveClass("runtime-config-fields--gateway");
+  expect(screen.getByLabelText("连接超时（秒）").closest("label")).toHaveClass("runtime-config-field-half");
+  expect(screen.getByLabelText("等待超时（秒）").closest("label")).toHaveClass("runtime-config-field-half");
+  await userEvent.type(gatewayUrl, "wss://gateway.example/ws");
+  const authToken = screen.getByLabelText("认证令牌");
+  expect(authToken).toHaveAttribute("type", "password");
+  await userEvent.type(authToken, "secret-token");
+  await userEvent.selectOptions(screen.getByLabelText("会话策略"), "issue");
+  await userEvent.type(screen.getByLabelText("连接超时（秒）"), "150");
+  await userEvent.type(screen.getByLabelText("等待超时（秒）"), "90");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -288,18 +340,21 @@ it("builds openclaw gateway config from dedicated runtime fields", async () => {
       body: JSON.stringify({
         name: "OpenClaw Agent",
         role: "engineer",
+        reportsTo: "agent-1",
         agentRuntimeType: "openclaw_gateway",
         agentRuntimeConfig: {
           url: "wss://gateway.example/ws",
           authToken: "secret-token",
           sessionKeyStrategy: "issue",
+          timeoutSec: 150,
+          waitTimeoutMs: 90000,
         },
       }),
     }),
   );
 }, 10000);
 
-it("hires agents as the CEO actor and opens the pending approval agent", async () => {
+it("hires agents as the current Human and assigns the CEO as manager", async () => {
   const ceo = { id: "agent-ceo", orgId: "org-1", name: "CEO", role: "ceo", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0 };
   const pendingAgent = { id: "agent-pending", orgId: "org-1", name: "Reviewer", role: "qa", status: "pending_approval", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0 };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -336,8 +391,8 @@ it("hires agents as the CEO actor and opens the pending approval agent", async (
   const hireCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/orgs/org-1/agent-hires" && init?.method === "POST");
   expect(hireCall).toBeTruthy();
   const headers = hireCall?.[1]?.headers as Headers;
-  expect(headers.get("x-test-agent-id")).toBe("agent-ceo");
-  expect(headers.get("x-test-org-id")).toBe("org-1");
+  expect(headers.get("x-test-agent-id")).toBeNull();
+  expect(JSON.parse(String(hireCall?.[1]?.body))).toMatchObject({ reportsTo: "agent-ceo" });
   expect(await screen.findByRole("heading", { name: "Reviewer" })).toBeInTheDocument();
   expect(screen.getByText("待审批")).toBeInTheDocument();
 }, 10000);
@@ -606,7 +661,10 @@ it("opens global provider settings without an active organization", async () => 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/organizations");
+  expect(screen.getByRole("button", { name: "组织菜单" })).toHaveAttribute("title", "选择或创建组织");
+  expect(screen.getByRole("button", { name: "快速创建" })).toBeDisabled();
   await userEvent.click(await screen.findByRole("button", { name: "设置" }));
+  expect(screen.getByRole("button", { name: "设置", exact: true })).toHaveAttribute("aria-expanded", "true");
   const dialog = within(screen.getByRole("dialog", { name: "设置" }));
 
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
@@ -781,12 +839,11 @@ it("shows empty detail tabs when the organization has no agents", async () => {
 
   renderApp("/orgs/org-empty/agents");
   const details = await screen.findByRole("navigation", { name: "智能体详情导航" });
-  expect(within(details).getByRole("button", { name: "概览" })).toBeInTheDocument();
   expect(within(details).getByRole("button", { name: "配置" })).toBeInTheDocument();
   expect(within(details).getByRole("button", { name: "运行" })).toBeInTheDocument();
+  expect(within(details).queryByRole("button", { name: "概览" })).not.toBeInTheDocument();
   expect(screen.queryByLabelText("状态筛选")).not.toBeInTheDocument();
 
-  await userEvent.click(within(details).getByRole("button", { name: "配置" }));
   expect(screen.getByRole("heading", { name: "配置" })).toBeInTheDocument();
   expect(screen.getByText("暂无智能体。创建智能体后可查看和管理此内容。")).toBeInTheDocument();
 });

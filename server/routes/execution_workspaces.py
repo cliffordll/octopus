@@ -6,6 +6,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
 from ..dependencies.access import assert_organization_access
 from ..dependencies.workspaces import get_workspace_service
+from ..dependencies.workspace_access import (
+    WorkspaceResourceAccess,
+    require_execution_workspace_manage,
+)
 from ..services.workspaces import WorkspaceService
 
 router = APIRouter(tags=["execution-workspaces"])
@@ -88,6 +92,7 @@ async def preview_execution_workspace_merge_route(
     workspaceId: str,
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> dict[str, Any]:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
@@ -108,6 +113,7 @@ async def merge_execution_workspace_route(
     workspaceId: str,
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> dict[str, Any]:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
@@ -130,6 +136,7 @@ async def prepare_execution_workspace_pr_route(
     workspaceId: str,
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> dict[str, Any]:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
@@ -153,6 +160,7 @@ async def create_execution_workspace_pr_route(
     workspaceId: str,
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> dict[str, Any]:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
@@ -180,6 +188,7 @@ async def commit_execution_workspace_route(
     workspaceId: str,
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> dict[str, Any]:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
@@ -202,6 +211,7 @@ async def push_execution_workspace_route(
     workspaceId: str,
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> dict[str, Any]:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
@@ -229,6 +239,7 @@ async def push_execution_workspace_route(
 async def abandon_execution_workspace_route(
     workspaceId: str,
     request: Request,
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> Any:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
@@ -247,6 +258,7 @@ async def cleanup_execution_workspace_route(
     workspaceId: str,
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> Any:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
@@ -266,6 +278,7 @@ async def cleanup_execution_workspace_route(
 async def archive_execution_workspace_route(
     workspaceId: str,
     request: Request,
+    _: WorkspaceResourceAccess = Depends(require_execution_workspace_manage),
     service: WorkspaceService = Depends(get_workspace_service),
 ) -> Any:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)

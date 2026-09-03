@@ -11,7 +11,8 @@ from packages.shared.api_paths.runtime_providers import (
     ORG_RUNTIME_PROVIDER_LIST_PATH,
 )
 
-from ..dependencies.access import require_actor_identity, require_organization_access
+from ..dependencies.access import require_actor_identity
+from ..dependencies.identity import require_organization_permission
 from ..dependencies.runtime_providers import get_runtime_provider_service
 from ..services.runtime_providers import RuntimeProviderService
 
@@ -22,7 +23,7 @@ router = APIRouter(tags=["runtime-providers"])
 async def list_runtime_providers_route(
     orgId: str,
     runtimeType: str,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> list[dict[str, Any]]:
     try:
@@ -38,7 +39,7 @@ async def create_runtime_provider_route(
     orgId: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
@@ -63,7 +64,7 @@ async def update_runtime_provider_route(
     runtimeType: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
@@ -93,7 +94,7 @@ async def delete_runtime_provider_route(
     providerId: str,
     runtimeType: str,
     request: Request,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
@@ -121,7 +122,7 @@ async def list_runtime_models_route(
     orgId: str,
     providerId: str,
     runtimeType: str,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> list[dict[str, Any]]:
     try:
@@ -143,7 +144,7 @@ async def create_runtime_model_route(
     runtimeType: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
@@ -178,7 +179,7 @@ async def update_runtime_model_route(
     runtimeType: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
@@ -210,7 +211,7 @@ async def delete_runtime_model_route(
     modelId: str,
     runtimeType: str,
     request: Request,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("runtime:manage")),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)

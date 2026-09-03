@@ -7,10 +7,6 @@ from ..constants.issue import IssuePriority, IssueStatus
 from .approval import ApprovalDetail
 
 
-class AgentPermissions(TypedDict):
-    canCreateAgents: bool
-
-
 class Agent(TypedDict):
     id: str
     orgId: str
@@ -30,7 +26,6 @@ class Agent(TypedDict):
     spentMonthlyCents: int
     pauseReason: PauseReason | None
     pausedAt: str | None
-    permissions: AgentPermissions
     lastHeartbeatAt: str | None
     metadata: dict[str, Any] | None
     createdAt: str
@@ -44,11 +39,34 @@ class AgentChainOfCommandEntry(TypedDict):
     title: str | None
 
 
+class AgentAccessRole(TypedDict):
+    id: str
+    orgId: str
+    principalType: str
+    principalId: str
+    status: str
+    role: str
+    createdAt: str
+    updatedAt: str
+
+
+class AgentAccessPermission(TypedDict):
+    id: str
+    orgId: str
+    principalType: str
+    principalId: str
+    permissionKey: str
+    constraints: dict[str, Any] | None
+    grantedByUserId: str | None
+    createdAt: str
+    updatedAt: str
+
+
 class AgentAccessState(TypedDict):
     canAssignTasks: bool
     taskAssignSource: str
-    membership: None
-    grants: list[dict[str, Any]]
+    role: AgentAccessRole | None
+    permissions: list[AgentAccessPermission]
 
 
 class AgentDetail(Agent):
@@ -86,7 +104,6 @@ class CreateAgentPayload(TypedDict, total=False):
     agentRuntimeConfig: dict[str, Any]
     runtimeConfig: dict[str, Any]
     budgetMonthlyCents: int
-    permissions: NotRequired[AgentPermissions]
     metadata: NotRequired[dict[str, Any] | None]
 
 
@@ -131,7 +148,6 @@ class AgentConfiguration(TypedDict):
     agentRuntimeType: AgentRuntimeType
     agentRuntimeConfig: dict[str, Any]
     runtimeConfig: dict[str, Any]
-    permissions: AgentPermissions
     updatedAt: str
 
 

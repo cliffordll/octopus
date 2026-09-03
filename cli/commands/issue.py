@@ -64,6 +64,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     list_parser.add_argument("--org-id", required=True)
     list_parser.add_argument("--status", choices=STATUSES)
     list_parser.add_argument("--assignee-agent-id")
+    list_parser.add_argument("--assignee-user-id")
     list_parser.add_argument("--project-id")
     list_parser.add_argument("--goal-id")
     list_parser.add_argument("--parent-id")
@@ -269,6 +270,7 @@ def list_issues(args: argparse.Namespace, client: ApiClient) -> Any:
         for key, value in {
             "status": args.status,
             "assigneeAgentId": args.assignee_agent_id,
+            "assigneeUserId": args.assignee_user_id,
             "projectId": args.project_id,
             "goalId": args.goal_id,
             "parentId": args.parent_id,

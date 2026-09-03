@@ -188,6 +188,7 @@ export interface IssueListItem {
   priority: IssuePriority;
   projectId: string | null;
   goalId: string | null;
+  parentId?: string | null;
   assigneeAgentId: string | null;
   assigneeUserId: string | null;
   createdByAgentId: string | null;
@@ -449,6 +450,7 @@ export interface IssueAttachment {
 export interface IssueFilters {
   status?: IssueStatus;
   assigneeAgentId?: string;
+  assigneeUserId?: string;
   projectId?: string;
   goalId?: string;
   parentId?: string;
@@ -491,7 +493,7 @@ export interface CreateActivityPayload {
   action: string;
   entityType: string;
   entityId: string;
-  actorType?: "agent" | "user" | "system" | "board";
+  actorType?: "agent" | "user" | "system";
   agentId?: string | null;
   runId?: string | null;
   details?: Record<string, unknown> | null;
@@ -1126,6 +1128,7 @@ export interface Agent {
   agentRuntimeConfig: Record<string, unknown>;
   runtimeConfig?: Record<string, unknown>;
   budgetMonthlyCents: number;
+  spentMonthlyCents?: number;
   lastHeartbeatAt: string | null;
   reportsTo?: string | null;
 }
@@ -1165,7 +1168,6 @@ export interface AgentConfiguration {
   agentRuntimeType?: AgentRuntimeType;
   agentRuntimeConfig?: Record<string, unknown>;
   runtimeConfig: Record<string, unknown>;
-  permissions?: Record<string, boolean>;
   updatedAt?: string;
 }
 

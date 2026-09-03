@@ -11,11 +11,11 @@ from packages.shared.api_paths.llm import (
     LLM_PROVIDER_LIST_PATH,
 )
 
-from ..dependencies.access import require_actor_identity
+from ..dependencies.access import require_actor_identity, require_root_access
 from ..dependencies.runtime_providers import get_runtime_provider_service
 from ..services.runtime_providers import RuntimeProviderService
 
-router = APIRouter(tags=["llm"])
+router = APIRouter(tags=["llm"], dependencies=[Depends(require_root_access)])
 
 DEFAULT_RUNTIME_TYPE = "opencode_local"
 

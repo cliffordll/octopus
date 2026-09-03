@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from server.access import AccessDeniedError, IssueUpdateAccessPolicy
+
 from packages.shared.api_paths.issue_attachments import (
     ATTACHMENT_DETAIL_PATH,
     ISSUE_ATTACHMENTS_PATH,
@@ -69,19 +71,31 @@ from packages.database.queries.heartbeat import get_wakeup_by_idempotency_key
 from ..dependencies.access import (
     assert_organization_access,
     require_actor_identity,
-    require_board_access,
     require_organization_access,
 )
 from ..dependencies.agents import get_agent_service
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.issues import get_issue_service
+from ..dependencies.issue_access import (
+    IssueOrganizationAccess,
+    get_issue_organization_access,
+    require_issue_documents_manage,
+    require_issue_tasks_assign,
+)
+from ..dependencies.identity import require_organization_permission
 from ..dependencies.documents import get_document_service
 from ..dependencies.database import get_session
 from ..dependencies.workspaces import get_workspace_service
+from ..dependencies.workspace_access import (
+    WorkspaceResourceAccess,
+    require_attachment_documents_manage,
+    require_work_product_documents_manage,
+)
 from ..services.heartbeat import (
     HeartbeatService,
     track_dispatch_task,
 )
+from ..services.issue_delegation import IssueDelegationDenied
 from ..services.run_dispatch import RunDispatchService
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
 from ..services.child_dispatch import ChildDispatchCoordinator
@@ -108,6 +122,7 @@ from ..services.workspaces import WorkspaceService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["issues"])
+require_tasks_assign_permission = require_organization_permission("tasks:assign")
 
 
 def _schedule_dispatch(request: Request, agent_id: str) -> None:
@@ -163,6 +178,7 @@ async def list_org_issues_route(
     service: IssueService = Depends(get_issue_service),
     status: str | None = Query(default=None),
     assigneeAgentId: str | None = Query(default=None),
+    assigneeUserId: str | None = Query(default=None),
     projectId: str | None = Query(default=None),
     goalId: str | None = Query(default=None),
     parentId: str | None = Query(default=None),
@@ -174,6 +190,8 @@ async def list_org_issues_route(
         raw_query["status"] = status
     if assigneeAgentId is not None:
         raw_query["assigneeAgentId"] = assigneeAgentId
+    if assigneeUserId is not None:
+        raw_query["assigneeUserId"] = assigneeUserId
     if projectId is not None:
         raw_query["projectId"] = projectId
     if goalId is not None:
@@ -195,6 +213,7 @@ async def list_org_issues_route(
         orgId,
         status=validated.get("status"),
         assignee_agent_id=validated.get("assigneeAgentId"),
+        assignee_user_id=validated.get("assigneeUserId"),
         project_id=validated.get("projectId"),
         goal_id=validated.get("goalId"),
         parent_id=validated.get("parentId"),
@@ -207,7 +226,7 @@ async def list_org_issues_route(
 async def create_issue_route(
     request: Request,
     orgId: str,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_tasks_assign_permission),
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
@@ -271,6 +290,7 @@ async def create_issue_children_route(
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
+    _: IssueOrganizationAccess = Depends(require_issue_tasks_assign),
 ) -> dict[str, Any]:
     try:
         payload = validate_create_child_issues(body)
@@ -288,6 +308,18 @@ async def create_issue_children_route(
         )
     assert_organization_access(request, access_parent["orgId"])
     canonical_parent_id = access_parent["id"]
+    try:
+        await ParentChildControlAuthorizer(heartbeat).authorize(
+            ParentChildControlContext(parent=access_parent),
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ParentChildControlDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     await service.end_child_batch_preflight()
     try:
         parent, children, created = await service.create_child_issues(
@@ -307,6 +339,11 @@ async def create_issue_children_route(
             actor_id=actor.actor_id,
         )
         await service.commit_child_issues()
+    except IssueDelegationDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except ValueError as exc:
         status_code = (
             http_status.HTTP_404_NOT_FOUND
@@ -368,6 +405,7 @@ async def retry_child_issue_route(
     request: Request,
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    _: IssueOrganizationAccess = Depends(require_issue_tasks_assign),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
     detail = await service.get_by_id(id)
@@ -417,6 +455,7 @@ async def replace_child_issue_route(
     body: dict[str, Any] = Body(...),
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    _: IssueOrganizationAccess = Depends(require_issue_tasks_assign),
 ) -> IssueDetail:
     actor = require_actor_identity(request)
     old_child = await service.get_by_id(id)
@@ -529,6 +568,7 @@ async def accept_incomplete_issue_route(
     body: dict[str, Any] = Body(...),
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    _: IssueOrganizationAccess = Depends(require_issue_tasks_assign),
 ) -> IssueDetail:
     actor = require_actor_identity(request)
     if actor.actor_type == "agent":
@@ -682,6 +722,7 @@ async def checkout_issue_route(
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
+    _: IssueOrganizationAccess = Depends(require_issue_tasks_assign),
 ) -> IssueDetail:
     detail = await service.get_by_id(id)
     if detail is None:
@@ -756,6 +797,7 @@ async def execute_issue_route(
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     session: AsyncSession = Depends(get_session),
+    _: IssueOrganizationAccess = Depends(require_issue_tasks_assign),
 ) -> HeartbeatRun | JSONResponse:
     detail = await service.get_by_id(id)
     if detail is None:
@@ -869,6 +911,7 @@ async def request_issue_passive_followup_route(
     request: Request,
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    _: IssueOrganizationAccess = Depends(require_issue_tasks_assign),
 ) -> JSONResponse:
     detail = await service.get_by_id(id)
     if detail is None:
@@ -904,6 +947,7 @@ async def update_issue_route(
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
+    access: IssueOrganizationAccess = Depends(get_issue_organization_access),
 ) -> IssueDetail:
     detail = await service.get_by_id(id)
     if detail is None:
@@ -918,6 +962,12 @@ async def update_issue_route(
         raise HTTPException(
             status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
+        ) from exc
+    try:
+        IssueUpdateAccessPolicy().require(access.context, detail, payload)
+    except AccessDeniedError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN, detail=str(exc)
         ) from exc
     try:
         actor = require_actor_identity(request)
@@ -935,9 +985,17 @@ async def update_issue_route(
                 ),
             )
         assignee_done_requested_review = (
-            actor.actor_type == "agent"
-            and payload.get("status") == "done"
-            and detail.get("assigneeAgentId") == actor.actor_id
+            payload.get("status") == "done"
+            and (
+                (
+                    actor.actor_type == "agent"
+                    and detail.get("assigneeAgentId") == actor.actor_id
+                )
+                or (
+                    actor.actor_type == "user"
+                    and detail.get("assigneeUserId") == actor.actor_id
+                )
+            )
             and (
                 bool(detail.get("reviewerUserId"))
                 or (
@@ -1189,6 +1247,7 @@ async def record_issue_review_decision_route(
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
+    _: IssueOrganizationAccess = Depends(require_issue_tasks_assign),
 ) -> IssueDetail:
     detail = await service.get_by_id(id)
     if detail is None:
@@ -1254,6 +1313,7 @@ async def create_issue_work_product_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
+    _: IssueOrganizationAccess = Depends(require_issue_documents_manage),
     issue_service: IssueService = Depends(get_issue_service),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> IssueWorkProduct:
@@ -1284,15 +1344,9 @@ async def update_work_product_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
+    access: WorkspaceResourceAccess = Depends(require_work_product_documents_manage),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> IssueWorkProduct:
-    existing = await workspace_service.get_work_product(id)
-    if existing is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Work product not found",
-        )
-    assert_organization_access(request, existing["orgId"])
     try:
         payload = validate_update_issue_work_product(body)
     except ValueError as exc:
@@ -1313,6 +1367,7 @@ async def update_work_product_route(
 async def delete_work_product_route(
     id: str,
     request: Request,
+    access: WorkspaceResourceAccess = Depends(require_work_product_documents_manage),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> IssueWorkProduct:
     existing = await workspace_service.get_work_product(id)
@@ -1385,6 +1440,7 @@ async def upsert_issue_document_route(
     key: str,
     request: Request,
     body: dict[str, Any] = Body(...),
+    _: IssueOrganizationAccess = Depends(require_issue_documents_manage),
     issue_service: IssueService = Depends(get_issue_service),
     document_service: DocumentService = Depends(get_document_service),
 ) -> JSONResponse:
@@ -1399,7 +1455,11 @@ async def upsert_issue_document_route(
         document_key = validate_issue_document_key(key)
         payload = validate_upsert_issue_document(body)
         actor = require_actor_identity(request)
-        document, created, _ = await document_service.upsert_issue_document(
+        (
+            document,
+            created,
+            _revision_created,
+        ) = await document_service.upsert_issue_document(
             org_id=detail["orgId"],
             issue_id=id,
             key=document_key,
@@ -1449,18 +1509,9 @@ async def list_issue_document_revisions_route(
 async def delete_issue_document_route(
     id: str,
     key: str,
-    request: Request,
-    _: None = Depends(require_board_access),
-    issue_service: IssueService = Depends(get_issue_service),
+    access: IssueOrganizationAccess = Depends(require_issue_documents_manage),
     document_service: DocumentService = Depends(get_document_service),
 ) -> dict[str, bool]:
-    detail = await issue_service.get_by_id(id)
-    if detail is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Issue not found",
-        )
-    assert_organization_access(request, detail["orgId"])
     try:
         document_key = validate_issue_document_key(key)
     except ValueError as exc:
@@ -1498,7 +1549,7 @@ async def create_issue_attachment_route(
     orgId: str,
     issueId: str,
     request: Request,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("documents:manage")),
     service: IssueService = Depends(get_issue_service),
 ) -> IssueAttachment:
     detail = await service.get_by_id(issueId)
@@ -1532,6 +1583,7 @@ async def create_issue_attachment_route(
 async def delete_attachment_route(
     attachmentId: str,
     request: Request,
+    access: WorkspaceResourceAccess = Depends(require_attachment_documents_manage),
     service: IssueService = Depends(get_issue_service),
 ) -> Response:
     current = await service.get_attachment(attachmentId)

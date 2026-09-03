@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { organizationsApi } from "../api/organizations";
@@ -8,6 +8,7 @@ import { projectsApi } from "../api/projects";
 import type {
   ExecutionWorkspace,
   ExecutionWorkspaceFiles,
+  Agent,
   IssueListItem,
   IssueWorkProduct,
   OrganizationResource,
@@ -18,8 +19,10 @@ import type {
   WorkspaceFileTreeNode,
 } from "../api/types";
 import { Badge } from "../components/Badge";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
+import { ProjectWorkspaceExplorer } from "../components/ProjectWorkspaceExplorer";
 import { formatDateTime, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
@@ -45,6 +48,11 @@ const RESOURCE_ROLE_LABELS: Record<ProjectResourceRole, string> = {
   tracking: "跟踪",
   working_set: "工作集",
 };
+const PROJECT_PAUSE_REASON_LABELS = {
+  budget: "预算限制",
+  manual: "手动暂停",
+  system: "系统暂停",
+} as const;
 const WORKSPACE_POLICY_MODES = ["shared_workspace", "isolated_workspace", "operator_branch"] as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -200,29 +208,6 @@ function isWorkspaceArtifactProduct(product: IssueWorkProduct): boolean {
   return product.type !== "commit";
 }
 
-function workProductProjectType(type: string): string {
-  switch (type) {
-    case "commit":
-      return "代码提交";
-    case "pull_request":
-      return "Pull Request";
-    case "document":
-      return "文档";
-    case "artifact":
-      return "文件产物";
-    case "preview":
-      return "预览";
-    case "report":
-      return "报告";
-    default:
-      return type;
-  }
-}
-
-function projectArtifactIssueLabel(product: IssueWorkProduct, issues: Map<string, IssueListItem>): string {
-  const issue = issues.get(product.issueId);
-  return issue?.identifier ? `${issue.identifier} ${issue.title}` : issue?.title ?? product.issueId;
-}
 function normalizedWorkspacePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\/+/, "").trim();
 }
@@ -277,64 +262,7 @@ function productsByWorkspacePath(products: IssueWorkProduct[]): Map<string, Issu
   return grouped;
 }
 
-type WorkspaceFileTreeRow = {
-  depth: number;
-  node: WorkspaceFileTreeNode;
-};
-
-function flattenWorkspaceFileTree(nodes: WorkspaceFileTreeNode[], depth = 0): WorkspaceFileTreeRow[] {
-  return nodes.flatMap((node) => [
-    { depth, node },
-    ...(node.type === "directory" && node.children ? flattenWorkspaceFileTree(node.children, depth + 1) : []),
-  ]);
-}
-
-function WorkspaceFileTreeTable({ issues, nodes, orgId, productsByPath }: { issues: Map<string, IssueListItem>; nodes: WorkspaceFileTreeNode[]; orgId: string; productsByPath: Map<string, IssueWorkProduct[]> }) {
-  return (
-    <div className="project-workspace-file-tree-table" role="treegrid">
-      {flattenWorkspaceFileTree(nodes).map(({ depth, node }) => {
-        const nodeProducts = node.type === "file" ? productsByPath.get(normalizedWorkspacePath(node.path)) ?? [] : [];
-        const primaryProduct = nodeProducts[0];
-        return (
-          <div className={`project-workspace-file-row ${node.type} ${primaryProduct ? "has-products" : ""}`} key={node.path} role="row">
-            <div className="project-workspace-file-name" role="gridcell" style={{ "--depth": depth } as React.CSSProperties} title={node.path}>
-              <span className="project-workspace-file-icon" aria-hidden="true">{node.type === "directory" ? "D" : "F"}</span>
-              <span>{node.name}</span>
-            </div>
-            {primaryProduct ? (
-              <>
-                <span className="project-workspace-file-muted" role="gridcell">{typeof primaryProduct.byteSize === "number" ? formatFileSize(primaryProduct.byteSize) : typeof node.size === "number" ? formatFileSize(node.size) : ""}</span>
-                <span className="project-workspace-file-muted" role="gridcell">{formatDateTime(primaryProduct.createdAt)}</span>
-                <Link className="project-workspace-file-task" role="gridcell" title={projectArtifactIssueLabel(primaryProduct, issues)} to={`/orgs/${orgId}/issues/${primaryProduct.issueId}`}>{projectArtifactIssueLabel(primaryProduct, issues)}</Link>
-                <span className="project-workspace-file-title" role="gridcell" title={primaryProduct.summary ?? primaryProduct.title ?? undefined}>{primaryProduct.title || primaryProduct.summary || workProductProjectType(primaryProduct.type)}</span>
-                <span role="gridcell"><Badge>{workProductProjectType(primaryProduct.type)}</Badge></span>
-                <span role="gridcell"><Badge>{primaryProduct.status}</Badge></span>
-                <span className="project-workspace-file-primary" role="gridcell" title={nodeProducts.length > 1 ? `${nodeProducts.length} 个产物` : undefined}>{primaryProduct.isPrimary ? "主" : nodeProducts.length > 1 ? `${nodeProducts.length}` : ""}</span>
-              </>
-            ) : (
-              <>
-                <span className="project-workspace-file-muted" role="gridcell">{node.type === "file" && typeof node.size === "number" ? formatFileSize(node.size) : ""}</span>
-                <span className="project-workspace-file-muted" role="gridcell">{node.type === "file" ? formatDateTime(node.modifiedAt) : ""}</span>
-                <span role="gridcell" />
-                <span role="gridcell" />
-                <span role="gridcell" />
-                <span role="gridcell" />
-                <span role="gridcell" />
-              </>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-function formatFileSize(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`;
-  return `${Math.round(size / 1024 / 102.4) / 10} MB`;
-}
-
-function ProjectWorkspaceDirectory({ issues, orgId, products, workspace }: { issues: Map<string, IssueListItem>; orgId: string; products: IssueWorkProduct[]; workspace: ExecutionWorkspace }) {
+function ProjectWorkspaceDirectory({ agents, issues, orgId, products, workspace }: { agents: Agent[]; issues: Map<string, IssueListItem>; orgId: string; products: IssueWorkProduct[]; workspace: ExecutionWorkspace }) {
   const files = useQuery<ExecutionWorkspaceFiles>({
     queryKey: ["execution-workspace-files", workspace.id],
     queryFn: () => projectsApi.executionWorkspaceFiles(workspace.id),
@@ -349,89 +277,68 @@ function ProjectWorkspaceDirectory({ issues, orgId, products, workspace }: { iss
       {!files.isLoading && files.data && !files.data.available && <p className="project-resource-empty muted">{files.data.error ?? "当前工作区目录不可浏览。"}</p>}
       {!files.isLoading && files.data?.available && fileTree.length === 0 && <p className="project-resource-empty muted">项目目录为空。</p>}
       {files.data?.available && fileTree.length > 0 && (
-        <>
-          <div className="project-workspace-file-tree-header" aria-hidden="true">
-            <span>文件名</span>
-            <span>大小</span>
-            <span>创建时间</span>
-            <span>任务</span>
-            <span>产物标题</span>
-            <span>类型</span>
-            <span>状态</span>
-            <span>标记</span>
-          </div>
-          <WorkspaceFileTreeTable issues={issues} nodes={fileTree} orgId={orgId} productsByPath={productsByPath} />
-        </>
+        <ProjectWorkspaceExplorer agents={agents} issues={issues} nodes={fileTree} orgId={orgId} productsByPath={productsByPath} />
       )}
     </section>
   );
 }
 function ProjectWorkspaceArtifacts({
+  agents,
   executionWorkspaces,
   issues,
   loading,
   orgId,
   products,
-  projectWorkspaces,
 }: {
+  agents: Agent[];
   executionWorkspaces: ExecutionWorkspace[];
   issues: IssueListItem[];
   loading: boolean;
   orgId: string;
   products: IssueWorkProduct[];
-  projectWorkspaces: ProjectWorkspace[];
 }) {
   const issueMap = new Map(issues.map((issue) => [issue.id, issue]));
   const executionWorkspaceMap = new Map(executionWorkspaces.map((workspace) => [workspace.id, workspace]));
-  const artifactProducts = products.filter(isWorkspaceArtifactProduct);
+  const visibleWorkspaceIds = new Set(executionWorkspaceMap.keys());
+  const artifactProducts = products.filter(
+    (product) => isWorkspaceArtifactProduct(product)
+      && Boolean(product.executionWorkspaceId && visibleWorkspaceIds.has(product.executionWorkspaceId)),
+  );
   const groupedProducts = new Map<string, IssueWorkProduct[]>();
   for (const product of artifactProducts) {
     const key = product.executionWorkspaceId || "unassigned";
     groupedProducts.set(key, [...(groupedProducts.get(key) ?? []), product]);
   }
-  const workspaceIds = [...new Set([...executionWorkspaces.map((workspace) => workspace.id), ...groupedProducts.keys()])];
-  const primaryCount = artifactProducts.filter((product) => product.isPrimary).length;
+  const workspaceIds = executionWorkspaces.map((workspace) => workspace.id);
 
   return (
     <section className="project-workspace-artifacts project-tab-panel-wide" aria-label="工作区产物">
-      <div className="project-workspace-artifacts-header">
-        <div>
-          <p className="eyebrow">WORKSPACE OUTPUTS</p>
-          <div className="project-workspace-title-line">
-            <h2>工作区</h2>
-            <span>按执行工作区查看项目目录与任务产物</span>
-          </div>
-        </div>
-        <div className="project-artifact-summary compact">
-          <span><strong>{artifactProducts.length}</strong> 产物</span>
-          <span><strong>{primaryCount}</strong> 主产物</span>
-          <span><strong>{projectWorkspaces.length}</strong> 代码来源</span>
-        </div>
-      </div>
-      {loading && <p className="muted">正在加载工作区产物...</p>}
-      {!loading && artifactProducts.length === 0 && <p className="project-resource-empty muted">暂无任务产物。任务完成并登记产物后会出现在这里。</p>}
-      <div className="project-artifact-workspace-list">
-        {workspaceIds.map((workspaceId) => {
-          const workspaceProducts = groupedProducts.get(workspaceId) ?? [];
-          if (workspaceProducts.length === 0 && workspaceId === "unassigned") return null;
-          const workspace = executionWorkspaceMap.get(workspaceId);
-          return (
-            <section className="project-artifact-workspace" key={workspaceId} aria-label={workspace?.name ?? "未绑定工作区"}>
-              <div className="project-artifact-workspace-heading">
-                <div>
-                  <strong>{workspace?.name ?? "未绑定工作区"}</strong>
-                  <span title={workspace?.cwd ?? undefined}>{workspace?.cwd ?? "未记录执行目录"}</span>
+      <div className="project-workspace-artifacts-body">
+        {loading && <p className="muted">正在加载工作区产物...</p>}
+        {!loading && executionWorkspaces.length === 0 && <p className="project-resource-empty muted">当前执行模式暂无工作区。任务开始运行后会显示在这里。</p>}
+        <div className="project-artifact-workspace-list">
+          {workspaceIds.map((workspaceId) => {
+            const workspaceProducts = groupedProducts.get(workspaceId) ?? [];
+            if (workspaceProducts.length === 0 && workspaceId === "unassigned") return null;
+            const workspace = executionWorkspaceMap.get(workspaceId);
+            return (
+              <section className="project-artifact-workspace" key={workspaceId} aria-label={workspace?.name ?? "未绑定工作区"}>
+                <div className="project-artifact-workspace-heading">
+                  <div>
+                    <strong>{workspace?.name ?? "未绑定工作区"}</strong>
+                    <span title={workspace?.cwd ?? undefined}>{workspace?.cwd ?? "未记录执行目录"}</span>
+                  </div>
+                  <div className="project-workspace-badges">
+                    {workspace?.mode && <Badge>{workspace.mode}</Badge>}
+                    {workspace?.status && <Badge>{workspace.status}</Badge>}
+                    <Badge>{workspaceProducts.length} 个产物</Badge>
+                  </div>
                 </div>
-                <div className="project-workspace-badges">
-                  {workspace?.mode && <Badge>{workspace.mode}</Badge>}
-                  {workspace?.status && <Badge>{workspace.status}</Badge>}
-                  <Badge>{workspaceProducts.length} 个产物</Badge>
-                </div>
-              </div>
-              {workspace && <ProjectWorkspaceDirectory issues={issueMap} orgId={orgId} products={workspaceProducts} workspace={workspace} />}
-            </section>
-        );
-      })}
+                {workspace && <ProjectWorkspaceDirectory agents={agents} issues={issueMap} orgId={orgId} products={workspaceProducts} workspace={workspace} />}
+              </section>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
@@ -441,15 +348,12 @@ function ProjectOutputLocations({ codebase }: { codebase: ProjectCodebase | unde
   const artifactsPath = workspaceRoot ? `${workspaceRoot}/artifacts` : "未设置";
   const plansAndSkillsPath = workspaceRoot ? `${workspaceRoot}/plans · ${workspaceRoot}/skills` : "未设置";
   return (
-    <section className="project-config-section project-config-step-output" aria-label="组织草稿与产物">
-      <div className="project-section-heading">
-        <div>
-          <p className="eyebrow">OUTPUTS</p>
-          <h2>组织草稿与产物</h2>
-          <p className="muted">无代码任务在组织草稿目录中执行；所有任务的持久产物统一保存在组织目录下。</p>
-        </div>
-      </div>
-      <div className="project-property-list">
+    <details className="project-config-collapsible project-config-step-output" open>
+      <summary>
+        <span><strong>高级信息</strong><small>组织目录与产物位置</small></span>
+        <Badge>只读</Badge>
+      </summary>
+      <div className="project-config-collapsible-body project-property-list">
         <div className="project-property-row">
           <span>组织草稿目录</span>
           <strong title={workspaceRoot ?? "未设置"}>{workspaceRoot ?? "未设置"}</strong>
@@ -463,7 +367,7 @@ function ProjectOutputLocations({ codebase }: { codebase: ProjectCodebase | unde
           <strong title={plansAndSkillsPath}>{plansAndSkillsPath}</strong>
         </div>
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -539,16 +443,14 @@ function ExecutionWorkspacePanel({
   const gitAvailable = Boolean(status?.git?.available);
   const canCleanup = Boolean(status?.canArchive) || (selectedDirty && cleanupDiscardConfirmed && !status?.lease.locked);
   return (
-    <section className="project-config-section project-workspace-manager project-config-step-history" aria-label="任务运行记录">
-      <div className="project-section-heading">
-        <div>
-          <p className="eyebrow">RUN HISTORY</p>
-          <h2>任务运行记录</h2>
-          <p className="muted">查看每个任务实际执行目录的 Git 状态，并在审核后执行 diff、push 或归档。</p>
-        </div>
-      </div>
-      {Boolean(error) && <ErrorNotice error={error} />}
-      <div className="project-workspace-list execution-workspace-list">
+    <details className="project-config-collapsible project-config-step-history">
+      <summary>
+        <span><strong>运行管理</strong><small>Git 状态、合并、提交与归档</small></span>
+        <Badge>{workspaces.length} 条</Badge>
+      </summary>
+      <section className="project-config-collapsible-body project-workspace-manager" aria-label="任务运行记录">
+        {Boolean(error) && <ErrorNotice error={error} />}
+        <div className="project-workspace-list execution-workspace-list">
         {workspaces.length === 0 && <p className="project-workspace-empty">暂无任务运行记录。代码任务开始运行后会创建记录。</p>}
         {workspaces.map((workspace) => {
           const isSelected = workspace.id === selectedId;
@@ -628,8 +530,9 @@ function ExecutionWorkspacePanel({
             </div>
           );
         })}
-      </div>
-    </section>
+        </div>
+      </section>
+    </details>
   );
 }
 export function ProjectPage() {
@@ -647,6 +550,7 @@ export function ProjectPage() {
   const [workspaceRepoUrl, setWorkspaceRepoUrl] = useState("");
   const [workspaceRepoRef, setWorkspaceRepoRef] = useState("");
   const [workspaceSourceError, setWorkspaceSourceError] = useState("");
+  const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
   const [attachCatalogOpen, setAttachCatalogOpen] = useState(false);
   const [createResourceOpen, setCreateResourceOpen] = useState(false);
   const [newResourceName, setNewResourceName] = useState("");
@@ -711,6 +615,15 @@ export function ProjectPage() {
   }, [project.data]);
   const executionWorkspaceList = Array.isArray(executionWorkspaces.data) ? executionWorkspaces.data : [];
   const projectWorkspaces = project.data?.workspaces ?? [];
+  const primaryProjectWorkspace = project.data?.primaryWorkspace
+    ?? projectWorkspaces.find((workspace) => workspace.isPrimary)
+    ?? projectWorkspaces[0];
+  const projectWorkspaceExecutionList = primaryProjectWorkspace
+    ? executionWorkspaceList.filter(
+      (workspace) => workspace.projectWorkspaceId === primaryProjectWorkspace.id
+        && workspace.mode === "shared_workspace",
+    ).slice(0, 1)
+    : [];
   useEffect(() => {
     const firstWorkspaceId = executionWorkspaceList[0]?.id ?? "";
     if (!selectedExecutionWorkspaceId && firstWorkspaceId) setSelectedExecutionWorkspaceId(firstWorkspaceId);
@@ -758,6 +671,7 @@ export function ProjectPage() {
       setWorkspaceRepoRef("");
       setWorkspacePolicyMode("shared_workspace");
       setWorkspaceSourceError("");
+      setWorkspaceCreateOpen(false);
       invalidateProject();
     },
   });
@@ -962,33 +876,20 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
   );
   if (project.error) return <ErrorNotice error={project.error} />;
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <div className="project-detail-shell">
-      <header className="page-header project-detail-header">
-        <div className="project-header-identity">
-          <span className="project-avatar-lg" style={{ background: project.data?.color ?? "#6366f1" }}>
-            {(project.data?.name ?? "P").slice(0, 1).toUpperCase()}
-          </span>
-          <div className="project-detail-title">
-            <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回项目列表</Link>
-            <div className="project-heading-row">
-              <h1>{project.data?.name ?? "载入中..."}</h1>
-            </div>
-            {project.data && (
-              <div className="project-header-meta">
-                <Badge>{project.data.urlKey}</Badge>
-              </div>
-            )}
-            {project.data?.description && <p className="muted">{project.data.description}</p>}
-          </div>
-        </div>
-        {project.data && (
-          <div className="project-header-actions">
-            <Link className="button secondary" to={`/orgs/${orgId}/chats`}>聊天</Link>
-            <button className="danger" disabled={removeProject.isPending} onClick={() => removeProject.mutate()} type="button">删除项目</button>
-          </div>
-        )}
-      </header>
+    <OrgWorkspace contentClassName={`org-content-full tertiary-page-content${activeTab === "workspace" ? " project-workspace-content" : ""}`} orgId={orgId}>
+      <TertiaryPageShell className="project-detail-shell">
+      <TertiaryPageHeader
+        actions={project.data ? <>
+          <Link className="button secondary" to={`/orgs/${orgId}/chats`}>聊天</Link>
+          <button className="danger" disabled={removeProject.isPending} onClick={() => removeProject.mutate()} type="button">删除项目</button>
+        </> : undefined}
+        eyebrow="Project"
+        supporting={project.data ? <div className="project-header-meta">
+              <Badge>{project.data.urlKey}</Badge>
+              {project.data.description && <span>{project.data.description}</span>}
+        </div> : undefined}
+        title={project.data?.name ?? "载入中..."}
+      />
       {project.data && (
         <>
           {project.data.pauseReason === "budget" && (
@@ -998,55 +899,63 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
             </div>
           )}
           <nav aria-label="项目详情导航" className="detail-tabs">
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/workspace`}>工作区</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/budget`}>预算</NavLink>
+            <Link aria-current={activeTab === "configuration" ? "page" : undefined} className={activeTab === "configuration" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</Link>
+            <Link aria-current={activeTab === "workspace" ? "page" : undefined} className={activeTab === "workspace" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/workspace`}>工作区</Link>
+            <Link aria-current={activeTab === "resources" ? "page" : undefined} className={activeTab === "resources" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</Link>
+            <Link aria-current={activeTab === "issues" ? "page" : undefined} className={activeTab === "issues" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</Link>
+            <Link aria-current={activeTab === "budget" ? "page" : undefined} className={activeTab === "budget" ? "active" : undefined} to={`/orgs/${orgId}/projects/${projectId}/budget`}>预算</Link>
           </nav>
+          <TertiaryPageViewport
+            className={activeTab === "workspace" ? "tertiary-page-viewport-contained" : undefined}
+          >
           {activeTab === "budget" && (
-            <section className="project-properties-card project-tab-panel" aria-label="项目预算">
-              <div className="project-config-sections">
-                <section className="project-config-section">
-                  <div className="project-section-heading">
-                    <p className="eyebrow">Budget</p>
-                    <h2>预算</h2>
-                    <p className="muted">项目预算由组织成本治理和预算策略驱动；当前页面展示项目级治理状态。</p>
-                  </div>
-                  <div className="project-property-list">
-                    <div className="project-property-row">
-                      <span>预算状态</span>
-                      <strong>{project.data.pauseReason === "budget" ? "已触发硬限制" : "未触发硬限制"}</strong>
+            <section className="project-budget-panel project-tab-panel" aria-label="项目预算">
+              <div className={`project-budget-governance${project.data.pauseReason === "budget" ? " is-limited" : project.data.pauseReason ? " is-paused" : " is-ok"}`}>
+                <span aria-hidden="true" className="project-budget-governance-indicator" />
+                <div className="project-budget-governance-copy">
+                  <span>预算治理状态</span>
+                  <strong>{project.data.pauseReason === "budget" ? "已触发预算硬限制" : "预算限制未触发"}</strong>
+                  <p>
+                    {project.data.pauseReason === "budget"
+                      ? "项目已因预算治理自动暂停。"
+                      : project.data.pauseReason
+                        ? `项目当前因${PROJECT_PAUSE_REASON_LABELS[project.data.pauseReason]}，并非预算限制。`
+                        : "项目当前未因预算治理暂停。"}
+                  </p>
+                </div>
+                {project.data.pauseReason && (
+                  <dl className="project-budget-governance-meta">
+                    <div>
+                      <dt>暂停原因</dt>
+                      <dd>{PROJECT_PAUSE_REASON_LABELS[project.data.pauseReason]}</dd>
                     </div>
-                    <div className="project-property-row">
-                      <span>暂停原因</span>
-                      <strong>{project.data.pauseReason ?? "无"}</strong>
-                    </div>
-                    <div className="project-property-row">
-                      <span>暂停时间</span>
-                      <strong>{formatDateTime(project.data.pausedAt)}</strong>
-                    </div>
-                  </div>
-                </section>
+                    {project.data.pausedAt && (
+                      <div>
+                        <dt>暂停时间</dt>
+                        <dd>{formatDateTime(project.data.pausedAt)}</dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
               </div>
             </section>
           )}
           {activeTab === "configuration" && <div className="project-properties-card project-tab-panel">
             <div className="project-config-sections project-config-flow">
               <form className="project-config-section project-config-step-basic" onSubmit={save}>
-                <div className="project-section-heading">
-                  <p className="eyebrow">BASIC INFORMATION</p>
-                  <h2>基础信息</h2>
-                  <p className="muted">项目名称、状态、负责人、目标日期和关联目标。</p>
+                <div className="project-section-heading project-section-heading-actions">
+                  <div>
+                    <p className="eyebrow">Basic settings</p>
+                    <h2>基础设置</h2>
+                  </div>
+                  <button className="project-config-action" disabled={update.isPending} type="submit">
+                    {update.isPending ? "保存中..." : "保存设置"}
+                  </button>
                 </div>
                 <div className="project-property-list">
                   <label className="project-property-row">
                     <span>项目名称</span>
                     <input value={projectName} onChange={(event) => setProjectName(event.target.value)} required />
-                  </label>
-                  <label className="project-property-row project-property-row-start">
-                    <span>描述</span>
-                    <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
                   </label>
                   <label className="project-property-row">
                     <span>状态</span>
@@ -1068,12 +977,16 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                     <span>目标日期</span>
                     <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
                   </label>
-                  <label className="project-property-row">
-                    <span>目标 ID</span>
-                    <input value={goalIds} onChange={(event) => setGoalIds(event.target.value)} />
+                  <label className="project-property-row project-property-row-start">
+                    <span>描述</span>
+                    <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
                   </label>
                   <details className="project-system-metadata">
                     <summary>系统信息与关联目标</summary>
+                    <label className="project-property-row">
+                      <span>目标 ID</span>
+                      <input value={goalIds} onChange={(event) => setGoalIds(event.target.value)} />
+                    </label>
                     <div className="project-property-row">
                       <span>URL 标识</span>
                       <strong>{project.data.urlKey}</strong>
@@ -1097,19 +1010,19 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                   </details>
                 </div>
                 {update.error && <ErrorNotice error={update.error} />}
-                <div className="project-property-actions">
-                  <button disabled={update.isPending} type="submit">
-                    {update.isPending ? "保存中..." : "保存基础信息"}
-                  </button>
-                </div>
               </form>
               <section className="project-config-section project-workspace-manager project-config-step-source" aria-label="项目工作区配置">
-              <div className="project-section-heading">
+              <div className="project-section-heading project-section-heading-actions">
                 <div>
-                  <p className="eyebrow">CODE SOURCE + EXECUTION MODE</p>
-                  <h2>项目工作区</h2>
-                  <p className="muted">每个项目工作区由代码来源和执行模式组成。任务显式选择工作区；未选择时使用默认工作区。</p>
+                  <p className="eyebrow">Workspace settings</p>
+                  <h2>工作区设置</h2>
                 </div>
+                <button className="secondary small-button project-config-action" onClick={() => {
+                  setWorkspaceCreateOpen((open) => !open);
+                  setWorkspaceSourceError("");
+                }} type="button">
+                  {workspaceCreateOpen ? "取消添加" : "添加工作区"}
+                </button>
               </div>
               {projectWorkspaces.length === 0 && (
                 <div className="project-workspace-fallback compact">
@@ -1117,7 +1030,7 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                   <span>无代码任务仍可使用组织草稿目录；代码任务需先添加代码来源并选择执行模式。</span>
                 </div>
               )}
-              <div className="project-workspace-create-grid">
+              {workspaceCreateOpen && <div className="project-workspace-create-grid">
                 <label>
                   名称
                   <input
@@ -1169,30 +1082,30 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                   </span>
                 </label>
                 <button
-                  className="project-workspace-create-button"
+                  className="project-workspace-create-button project-config-action"
                   disabled={createWorkspace.isPending}
                   onClick={submitWorkspace}
                   type="button"
                 >
-                  {createWorkspace.isPending ? "添加中..." : "添加工作区"}
+                  {createWorkspace.isPending ? "添加中..." : "确认添加"}
                 </button>
-              </div>
-              {workspaceSourceError && <p className="error-notice">{workspaceSourceError}</p>}
+              </div>}
+              {workspaceCreateOpen && workspaceSourceError && <p className="error-notice">{workspaceSourceError}</p>}
               <div className="project-workspace-list">
                 {(project.data.workspaces ?? []).map((workspace) => (
                   <div className="project-workspace-item" key={workspace.id}>
                     <div className="project-workspace-main">
                       <div className="project-workspace-name-row">
                         <strong>{workspace.name}</strong>
+                        <span className="project-workspace-path-inline" title={projectWorkspaceDisplay(workspace)}>
+                          {projectWorkspaceDisplay(workspace)}
+                        </span>
                         <div className="project-workspace-badges">
                           {workspace.isPrimary && <Badge>默认</Badge>}
                           <Badge>{workspace.sourceType}</Badge>
                           {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
                         </div>
                       </div>
-                      <span title={projectWorkspaceDisplay(workspace)}>
-                        {projectWorkspaceDisplay(workspace)}
-                      </span>
                       {(workspace.repoUrl || workspace.repoRef || workspace.defaultRef) && (
                         <small
                           className="project-workspace-repo-line"
@@ -1201,51 +1114,53 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                           {[workspace.repoUrl, workspace.repoRef ?? workspace.defaultRef].filter(Boolean).join(" · ")}
                         </small>
                       )}
-                      <label className="project-workspace-mode-control">
-                        <span>执行模式</span>
-                        <span className="project-workspace-mode-field">
-                          <select
-                            aria-label={`${workspace.name} 执行模式`}
-                            disabled={updateWorkspacePolicy.isPending}
-                            value={workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy)}
-                            onChange={(event) => updateWorkspacePolicy.mutate({
-                              workspaceId: workspace.id,
-                              mode: event.target.value as WorkspacePolicyMode,
-                              currentPolicy: workspace.executionWorkspacePolicy,
-                            })}
+                      <div className="project-workspace-config-row">
+                        <label className="project-workspace-mode-control">
+                          <span>执行模式</span>
+                          <span className="project-workspace-mode-field">
+                            <select
+                              aria-label={`${workspace.name} 执行模式`}
+                              disabled={updateWorkspacePolicy.isPending}
+                              value={workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy)}
+                              onChange={(event) => updateWorkspacePolicy.mutate({
+                                workspaceId: workspace.id,
+                                mode: event.target.value as WorkspacePolicyMode,
+                                currentPolicy: workspace.executionWorkspacePolicy,
+                              })}
+                            >
+                              {WORKSPACE_POLICY_OPTIONS.map((option) => (
+                                <option key={option.mode} value={option.mode}>{option.label}</option>))}
+                            </select>
+                            <small>{workspacePolicyDescription(workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy))}</small>
+                          </span>
+                        </label>
+                        <div className="project-workspace-actions">
+                          <button
+                            className="secondary small-button project-config-action"
+                            disabled={workspace.isPrimary || setPrimaryWorkspace.isPending}
+                            onClick={() => setPrimaryWorkspace.mutate(workspace.id)}
+                            type="button"
                           >
-                            {WORKSPACE_POLICY_OPTIONS.map((option) => (
-                              <option key={option.mode} value={option.mode}>{option.label}</option>))}
-                          </select>
-                          <small>{workspacePolicyDescription(workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy))}</small>
-                        </span>
-                      </label>
-                    </div>
-                    <div className="project-workspace-actions">
-                      <button
-                        className="secondary small-button"
-                        disabled={workspace.isPrimary || setPrimaryWorkspace.isPending}
-                        onClick={() => setPrimaryWorkspace.mutate(workspace.id)}
-                        type="button"
-                      >
-                        设为默认
-                      </button>
-                      <button
-                        className="danger small-button"
-                        disabled={
-                          removeWorkspace.isPending
-                          || (workspace.isPrimary && projectWorkspaces.length > 1)
-                        }
-                        onClick={() => removeWorkspace.mutate(workspace.id)}
-                        title={
-                          workspace.isPrimary && projectWorkspaces.length > 1
-                            ? "请先将另一个工作区设为默认"
-                            : undefined
-                        }
-                        type="button"
-                      >
-                        删除代码来源
-                      </button>
+                            设为默认
+                          </button>
+                          <button
+                            className="danger small-button project-config-action"
+                            disabled={
+                              removeWorkspace.isPending
+                              || (workspace.isPrimary && projectWorkspaces.length > 1)
+                            }
+                            onClick={() => removeWorkspace.mutate(workspace.id)}
+                            title={
+                              workspace.isPrimary && projectWorkspaces.length > 1
+                                ? "请先将另一个工作区设为默认"
+                                : undefined
+                            }
+                            type="button"
+                          >
+                            删除代码来源
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>))}
               </div>
@@ -1306,22 +1221,21 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
             {executionWorkspaces.error && <ErrorNotice error={executionWorkspaces.error} />}
             {issues.error && <ErrorNotice error={issues.error} />}
             <ProjectWorkspaceArtifacts
-              executionWorkspaces={executionWorkspaceList}
+              agents={agentList}
+              executionWorkspaces={projectWorkspaceExecutionList}
               issues={projectIssues}
-              loading={workProducts.isLoading || executionWorkspaces.isLoading || issues.isLoading}
+              loading={project.isLoading || workProducts.isLoading || executionWorkspaces.isLoading || issues.isLoading}
               orgId={orgId}
               products={workProducts.data ?? []}
-              projectWorkspaces={projectWorkspaces}
             />
           </>}          {activeTab === "resources" && <section className="project-resources project-tab-panel-wide">
-            <div className="project-resource-hero-card">
-              <div className="project-resource-hero-top">
-                <div>
-                  <p className="eyebrow">PROJECT RESOURCES</p>
-                  <h2>资源</h2>
-                  <p className="muted">选择智能体在当前项目中实际使用的仓库、文档、URL 和连接器对象。组织资源目录保持统一维护，这里只决定项目范围内需要加载的资源。</p>
-                </div>
-                <div className="project-resource-actions">
+            <div className="project-resource-toolbar project-summary-toolbar">
+              <div aria-label="资源摘要" className="project-resource-summary project-compact-summary" role="group">
+                <span className="project-summary-chip"><strong>{attachedResources.length}</strong> 已附加</span>
+                <span className="project-summary-chip"><strong>{roleCount(attachedResources, "working_set")}</strong> 工作集</span>
+                <span className="project-summary-chip"><strong>{roleCount(attachedResources, "reference")}</strong> 参考资料</span>
+              </div>
+              <div className="project-resource-actions">
                   <div className="project-resource-popover-anchor">
                     <button
                       className="secondary small-button"
@@ -1368,24 +1282,6 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                   </div>
                   <button className="small-button" onClick={() => setCreateResourceOpen(true)} type="button">新增资源</button>
                   <Link className="button secondary small-button" to={`/orgs/${orgId}/resources`}>组织资源目录</Link>
-                </div>
-              </div>
-              <div className="project-resource-summary">
-                <div className="summary-metric">
-                  <span>已附加</span>
-                  <strong>{attachedResources.length}</strong>
-                  <small>当前项目可见资源</small>
-                </div>
-                <div className="summary-metric">
-                  <span>工作集</span>
-                  <strong>{roleCount(attachedResources, "working_set")}</strong>
-                  <small>智能体需要主动操作的资源</small>
-                </div>
-                <div className="summary-metric">
-                  <span>参考资料</span>
-                  <strong>{roleCount(attachedResources, "reference")}</strong>
-                  <small>辅助理解背景与决策</small>
-                </div>
               </div>
             </div>
             {resources.error && <ErrorNotice error={resources.error} />}
@@ -1393,15 +1289,7 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
             {addResource.error && <ErrorNotice error={addResource.error} />}
             {createAndAttachResource.error && <ErrorNotice error={createAndAttachResource.error} />}
             {organizationResources.error && <ErrorNotice error={organizationResources.error} />}
-            <div className="project-resource-attached-card">
-              <div className="project-resource-attached-heading">
-                <div>
-                  <p className="eyebrow">ATTACHED RESOURCES</p>
-                  <h3>已附加资源</h3>
-                  <p className="muted">角色和备注只作用于当前项目，不会修改组织资源目录。</p>
-                </div>
-              </div>
-              <div className="project-resource-list">
+            <div className="project-resource-list">
                 {attachedResources.map((attachment) => (
                 <article className="project-resource-item" key={attachment.id}>
                   <div className="project-resource-item-main">
@@ -1463,7 +1351,6 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                   </div>
                 </article>))}
                 {resources.isSuccess && attachedResources.length === 0 && <p className="project-resource-empty muted">暂无关联资源。</p>}
-              </div>
             </div>
             {createResourceOpen && (
               <div className="modal-backdrop">
@@ -1517,30 +1404,23 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
               </div>
             )}
           </section>}
-          {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">PROJECT ISSUES</p>
-                <h2>任务</h2>
-                <p className="muted">按状态展示当前项目关联的任务。</p>
-              </div>
-            </div>
+          {activeTab === "issues" && <section className="project-issues project-tab-panel-wide" aria-label="项目任务">
             {issues.error && <ErrorNotice error={issues.error} />}
             {agents.error && <ErrorNotice error={agents.error} />}
-            <div className="project-issues-body">
-              {issues.isSuccess && projectIssues.length === 0 && <p className="muted">暂无关联任务。</p>}
-              <IssueStatusBoard
-                agents={agentList}
-                issues={projectIssues}
-                orgId={orgId}
-                projects={project.data ? [project.data] : []}
-                showProject={false}
-              />
-            </div>
+            <IssueStatusBoard
+              layout="list"
+              agents={agentList}
+              emptyMessage={issues.isSuccess ? "暂无关联任务。" : null}
+              issues={projectIssues}
+              orgId={orgId}
+              projects={project.data ? [project.data] : []}
+              showProject={false}
+            />
           </section>}
+          </TertiaryPageViewport>
         </>
       )}
-      </div>
+      </TertiaryPageShell>
     </OrgWorkspace>
   );
 }

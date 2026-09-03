@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 import importlib
@@ -8,12 +9,14 @@ import importlib.util
 import uuid
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.queries.runtime_providers import get_llm_runtime_default
+from packages.database.queries.users import ensure_user
 from packages.database.schema import (
     Agent,
     Base,
@@ -24,6 +27,8 @@ from packages.database.schema import (
 )
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from server.app import create_app
+from server.identity import PrincipalRef
+from server.roles import RoleService
 
 
 def test_runtime_provider_model_contract_exposes_paths() -> None:
@@ -73,8 +78,42 @@ async def app(
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = create_session_factory(engine)
+    async with factory() as session:
+        now = datetime.now(UTC)
+        await ensure_user(
+            session,
+            {
+                "id": "runtime-root",
+                "name": "Runtime Root",
+                "email": "runtime-root@example.invalid",
+                "email_verified": True,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        await RoleService(session).ensure(
+            "instance",
+            "instance",
+            PrincipalRef(type="user", id="runtime-root"),
+            role="root",
+        )
+        await session.commit()
     application = create_app()
     application.state.session_factory = factory
+
+    @application.middleware("http")
+    async def inject_root(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        request.state.actor = {
+            "type": "user",
+            "id": "runtime-root",
+            "userId": "runtime-root",
+            "isRoot": True,
+            "source": "test",
+        }
+        return await call_next(request)
+
     try:
         yield application, factory
     finally:

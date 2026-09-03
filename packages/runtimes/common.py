@@ -78,6 +78,8 @@ async def terminate_runtime_process(
 
 
 class UnavailableRuntimeAdapter:
+    supports_local_agent_jwt = False
+
     def __init__(self, runtime_type: str) -> None:
         self.type = runtime_type
 

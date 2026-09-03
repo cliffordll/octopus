@@ -5,6 +5,7 @@ import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import type { Agent, InstanceSchedulerHeartbeatAgent } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { roleLabel, statusLabel } from "../utils/display";
 
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
@@ -190,30 +191,13 @@ export function InstanceHeartbeatsPanel() {
                           <p title={formatDateTime(agent.lastHeartbeatAt)}>最近运行 {relativeTime(agent.lastHeartbeatAt)}</p>
                         </div>
                         <div className="heartbeat-row-actions">
-                          <div className="heartbeat-toggle-actions" aria-label={`状态检测 ${agent.agentName}`}>
-                            <button
-                              className={agent.heartbeatEnabled ? "active" : ""}
-                              disabled={saving}
-                              onClick={() =>
-                                !agent.heartbeatEnabled &&
-                                setHeartbeatEnabledMutation.mutate({ agent, enabled: true })
-                              }
-                              type="button"
-                            >
-                              启用
-                            </button>
-                            <button
-                              className={!agent.heartbeatEnabled ? "active" : ""}
-                              disabled={saving}
-                              onClick={() =>
-                                agent.heartbeatEnabled &&
-                                setHeartbeatEnabledMutation.mutate({ agent, enabled: false })
-                              }
-                              type="button"
-                            >
-                              关闭
-                            </button>
-                          </div>
+                          <SegmentedControl
+                            ariaLabel={`状态检测 ${agent.agentName}`}
+                            disabled={saving}
+                            onChange={(value) => setHeartbeatEnabledMutation.mutate({ agent, enabled: value === "enabled" })}
+                            options={[{ label: "启用", value: "enabled" }, { label: "关闭", value: "disabled" }]}
+                            value={agent.heartbeatEnabled ? "enabled" : "disabled"}
+                          />
                           <label className="heartbeat-interval-control">
                             <span>间隔</span>
                             <input

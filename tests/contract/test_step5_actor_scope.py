@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -19,9 +20,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from packages.database.clients import async_transaction
+from packages.database.queries.users import ensure_user
 from packages.database.schema import ActivityLog, Approval, Base, Issue, Organization
 from server.app import create_app
 from server.middleware import ActorContextMiddleware
+from server.identity import PrincipalRef
+from server.roles import RoleService
+
+
+USE_REAL_ACCESS = True
 
 
 @pytest.fixture
@@ -64,7 +71,7 @@ def app(
     application.state.session_factory = session_factory
 
     @application.middleware("http")
-    async def inject_agent_actor(
+    async def inject_test_actor(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         actor_id = request.headers.get("x-test-agent-id")
@@ -74,6 +81,16 @@ def app(
                 "id": actor_id,
                 "agentId": actor_id,
                 "orgId": request.headers["x-test-org-id"],
+            }
+        user_id = request.headers.get("x-test-user-id")
+        if user_id:
+            org_id = request.headers.get("x-test-org-id")
+            request.state.actor = {
+                "type": "user",
+                "id": user_id,
+                "userId": user_id,
+                "orgIds": [org_id] if org_id else [],
+                "source": "test",
             }
         return await call_next(request)
 
@@ -104,6 +121,24 @@ async def _seed_org(session: AsyncSession, name: str) -> str:
                 name=name,
                 issue_prefix=org_id[:6],
             )
+        )
+        now = datetime.now(UTC)
+        await ensure_user(
+            session,
+            {
+                "id": "user-1",
+                "name": "User One",
+                "email": "user-1@example.invalid",
+                "email_verified": True,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        await RoleService(session).ensure(
+            "organization",
+            org_id,
+            PrincipalRef(type="user", id="user-1"),
+            role="owner",
         )
     return org_id
 
@@ -144,11 +179,17 @@ async def test_local_actor_context_uses_octopus_run_header(
     assert body["runId"] == "run-1"
 
 
-async def test_local_trusted_actor_enables_org_creation(
+async def test_explicit_user_actor_enables_org_creation(
     app: FastAPI,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    code, body = await _request(app, "POST", "/api/orgs", json={"name": "Local Org"})
+    code, body = await _request(
+        app,
+        "POST",
+        "/api/orgs",
+        headers={"x-test-user-id": "user-1"},
+        json={"name": "Local Org"},
+    )
 
     assert code == 200
     async with session_factory() as verify:
@@ -156,11 +197,11 @@ async def test_local_trusted_actor_enables_org_creation(
             select(ActivityLog).where(ActivityLog.org_id == body["id"])
         )
         activity = result.scalar_one()
-    assert activity.actor_type == "board"
-    assert activity.actor_id == "local-board"
+    assert activity.actor_type == "user"
+    assert activity.actor_id == "user-1"
 
 
-async def test_issue_activity_uses_local_actor(
+async def test_issue_activity_uses_explicit_user_actor(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -171,6 +212,7 @@ async def test_issue_activity_uses_local_actor(
         app,
         "POST",
         f"/api/orgs/{org_id}/issues",
+        headers={"x-test-user-id": "user-1", "x-test-org-id": org_id},
         json={"title": "Scoped issue"},
     )
 
@@ -180,8 +222,8 @@ async def test_issue_activity_uses_local_actor(
             select(ActivityLog).where(ActivityLog.org_id == org_id)
         )
         activity = result.scalar_one()
-    assert activity.actor_type == "board"
-    assert activity.actor_id == "local-board"
+    assert activity.actor_type == "user"
+    assert activity.actor_id == "user-1"
 
 
 async def test_agent_cannot_read_issue_from_another_organization(

@@ -1,15 +1,19 @@
 ﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PropsWithChildren } from "react";
 import { Link, Navigate, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { agentsApi } from "../api/agents";
+import { accessApi, type OrganizationHierarchyMember } from "../api/access";
 import { organizationSkillsApi } from "../api/organizationSkills";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
-import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
+import type { OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { FileBrowser } from "../components/FileBrowser";
+import { MemberAccessSettings } from "../components/MemberAccessSettings";
 import { OrganizationCostPanel } from "../components/OrganizationCostPanel";
-import { sourceLabel, statusLabel } from "../utils/display";
+import { SidebarIcon } from "../components/SidebarIcon";
+import { TertiaryPageFrame, TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
+import { sourceLabel } from "../utils/display";
 
 export function OrganizationPage() {
   const { orgId = "" } = useParams();
@@ -61,13 +65,10 @@ export function OrganizationPage() {
   }
   if (organization.error) return <ErrorNotice error={organization.error} />;
   return (
-    <div className="org-content organization-settings">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Organization Settings</p>
-          <h1>组织设置</h1>
-        </div>
-      </header>
+    <div className="org-content organization-settings tertiary-page-content">
+      <TertiaryPageShell>
+      <TertiaryPageHeader eyebrow="Organization Settings" title="组织设置" />
+      <TertiaryPageViewport>
       <form className="panel form narrow" onSubmit={submit}>
           <label>
             组织名称
@@ -123,6 +124,8 @@ export function OrganizationPage() {
             </button>
           </div>
       </form>
+      </TertiaryPageViewport>
+      </TertiaryPageShell>
     </div>
   );
 }
@@ -130,15 +133,22 @@ export function OrganizationPage() {
 export function OrganizationCostsPage() {
   const { orgId = "" } = useParams();
   return (
-    <OrgWorkspace orgId={orgId}>
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Organization Costs</p>
-          <h1>成本</h1>
-          <p className="muted">查看当前组织下的 runtime cost event 汇总。</p>
-        </div>
-      </header>
+    <OrgWorkspace contentClassName="org-content-full tertiary-page-contained organization-fullscreen-detail organization-costs-content" orgId={orgId}>
+      <TertiaryPageHeader
+        eyebrow="Organization Costs"
+        supporting="按智能体、服务商、计费方和项目查看运行成本。"
+        title="成本"
+      />
       <OrganizationCostPanel orgId={orgId} />
+    </OrgWorkspace>
+  );
+}
+
+export function OrganizationMembersPage() {
+  const { orgId = "" } = useParams();
+  return (
+    <OrgWorkspace contentClassName="org-content-full organization-members-content" orgId={orgId}>
+      <MemberAccessSettings orgId={orgId} />
     </OrgWorkspace>
   );
 }
@@ -149,37 +159,38 @@ export function OrganizationIndexPage() {
 }
 
 const ORG_CARD_WIDTH = 210;
-const ORG_CARD_HEIGHT = 108;
+const ORG_CARD_HEIGHT = 132;
 const ORG_GAP_X = 34;
 const ORG_GAP_Y = 82;
 const ORG_PADDING = 56;
+const ORG_CANVAS_PADDING = 64;
 
 interface OrganizationNode {
-  agent: Agent;
+  member: OrganizationHierarchyMember;
   children: OrganizationNode[];
 }
 
 interface LayoutNode {
-  agent: Agent;
+  member: OrganizationHierarchyMember;
   x: number;
   y: number;
   children: LayoutNode[];
 }
 
-function buildOrganizationTree(agents: Agent[]): OrganizationNode[] {
-  const nodes = new Map(agents.map((agent) => [agent.id, { agent, children: [] as OrganizationNode[] }]));
+function buildOrganizationTree(members: OrganizationHierarchyMember[]): OrganizationNode[] {
+  const nodes = new Map(members.map((member) => [member.id, { member, children: [] as OrganizationNode[] }]));
   const roots: OrganizationNode[] = [];
   for (const node of nodes.values()) {
-    const parentId = node.agent.reportsTo;
+    const parentId = node.member.reportsTo;
     const parent = parentId ? nodes.get(parentId) : undefined;
-    if (parent && parent.agent.id !== node.agent.id) {
+    if (parent && parent.member.id !== node.member.id) {
       parent.children.push(node);
     } else {
       roots.push(node);
     }
   }
   const sortNodes = (items: OrganizationNode[]) => {
-    items.sort((left, right) => left.agent.name.localeCompare(right.agent.name));
+    items.sort((left, right) => left.member.displayName.localeCompare(right.member.displayName));
     items.forEach((item) => sortNodes(item.children));
   };
   sortNodes(roots);
@@ -202,7 +213,7 @@ function layoutNode(node: OrganizationNode, x: number, y: number): LayoutNode {
     return result;
   });
   return {
-    agent: node.agent,
+    member: node.member,
     children,
     x: x + (width - ORG_CARD_WIDTH) / 2,
     y,
@@ -241,18 +252,34 @@ function collectEdges(nodes: LayoutNode[]): Array<{ parent: LayoutNode; child: L
   return edges;
 }
 
+function fitOrganizationChart(viewport: HTMLDivElement, bounds: { width: number; height: number }): number {
+  const width = viewport.clientWidth || 800;
+  const height = viewport.clientHeight || 560;
+  const availableWidth = Math.max(width - 40, 1);
+  const availableHeight = Math.max(height - 40, 1);
+  return Math.min(
+    Math.max(Math.min(availableWidth / bounds.width, availableHeight / bounds.height), 0.35),
+    1,
+  );
+}
+
 export function OrganizationStructurePage() {
   const { orgId = "" } = useParams();
   const viewportRef = useRef<HTMLDivElement>(null);
+  const centeredRef = useRef(false);
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const agents = useQuery({
-    queryKey: ["agents", orgId],
-    queryFn: () => agentsApi.list(orgId),
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 560 });
+  const [adjusting, setAdjusting] = useState(false);
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [managerId, setManagerId] = useState("");
+  const queryClient = useQueryClient();
+  const hierarchy = useQuery({
+    queryKey: ["organization-hierarchy", orgId],
+    queryFn: () => accessApi.hierarchy(orgId),
   });
-  const agentList = Array.isArray(agents.data) ? agents.data : [];
-  const agentNameById = new Map(agentList.map((agent) => [agent.id, agent.name]));
-  const organizationTree = useMemo(() => buildOrganizationTree(agentList), [agentList]);
+  const memberList = Array.isArray(hierarchy.data) ? hierarchy.data : [];
+  const memberNameById = new Map(memberList.map((member) => [member.id, member.displayName]));
+  const organizationTree = useMemo(() => buildOrganizationTree(memberList), [memberList]);
   const layout = useMemo(() => layoutForest(organizationTree), [organizationTree]);
   const nodes = useMemo(() => flattenLayout(layout), [layout]);
   const edges = useMemo(() => collectEdges(layout), [layout]);
@@ -263,94 +290,221 @@ export function OrganizationStructurePage() {
       height: Math.max(...nodes.map((node) => node.y + ORG_CARD_HEIGHT)) + ORG_PADDING,
     };
   }, [nodes]);
+  const canvasWidth = Math.max(viewportSize.width, bounds.width * zoom + ORG_CANVAS_PADDING * 2);
+  const canvasHeight = Math.max(viewportSize.height, bounds.height * zoom + ORG_CANVAS_PADDING * 2);
+  const canvasOffset = {
+    x: Math.max(ORG_CANVAS_PADDING, (canvasWidth - bounds.width * zoom) / 2),
+    y: Math.max(ORG_CANVAS_PADDING, (canvasHeight - bounds.height * zoom) / 2),
+  };
 
   useEffect(() => {
-    if (!viewportRef.current || nodes.length === 0) return;
-    const width = viewportRef.current.clientWidth || 800;
-    const fitZoom = Math.min(Math.max((width - 40) / bounds.width, 0.45), 1);
-    setZoom(fitZoom);
-    setPan({ x: Math.max(20, (width - bounds.width * fitZoom) / 2), y: 20 });
-  }, [bounds, nodes.length]);
+    if (!viewportRef.current) return;
+    const viewport = viewportRef.current;
+    const measure = () => {
+      setViewportSize({
+        width: viewport.clientWidth || 800,
+        height: viewport.clientHeight || 560,
+      });
+    };
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(measure);
+      observer.observe(viewport);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  useEffect(() => {
+    if (!viewportRef.current || nodes.length === 0 || centeredRef.current) return;
+    const viewport = viewportRef.current;
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+      viewport.scrollTop = 0;
+      centeredRef.current = true;
+    });
+  }, [canvasWidth, nodes.length]);
+
+  const updateManager = useMutation({
+    mutationFn: () => {
+      if (!editingMemberId) throw new Error("请选择需要调整的成员");
+      return accessApi.updateManager(orgId, editingMemberId, managerId || null);
+    },
+    onSuccess: () => {
+      setEditingMemberId(null);
+      setManagerId("");
+      void queryClient.invalidateQueries({ queryKey: ["organization-hierarchy", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
+    },
+  });
+  const editingMember = memberList.find((member) => member.id === editingMemberId) ?? null;
+  const excludedManagerIds = useMemo(() => {
+    if (!editingMemberId) return new Set<string>();
+    const excluded = new Set<string>([editingMemberId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const member of memberList) {
+        if (member.reportsTo && excluded.has(member.reportsTo) && !excluded.has(member.id)) {
+          excluded.add(member.id);
+          changed = true;
+        }
+      }
+    }
+    return excluded;
+  }, [editingMemberId, memberList]);
+
+  function openManagerEditor(member: OrganizationHierarchyMember) {
+    setEditingMemberId(member.id);
+    setManagerId(member.reportsTo ?? "");
+  }
 
   function fitChart() {
     if (!viewportRef.current) return;
-    const width = viewportRef.current.clientWidth || 800;
-    const fitZoom = Math.min(Math.max((width - 40) / bounds.width, 0.45), 1);
-    setZoom(fitZoom);
-    setPan({ x: Math.max(20, (width - bounds.width * fitZoom) / 2), y: 20 });
+    const viewport = viewportRef.current;
+    setZoom(fitOrganizationChart(viewport, bounds));
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+      viewport.scrollTop = Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2);
+    });
   }
 
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Organization</p>
-          <h1>组织架构</h1>
-          <p className="muted">按上游组织图布局展示智能体汇报关系。</p>
-        </div>
-        {agentList.length > 0 && (
+    <OrgWorkspace contentClassName="org-content-full tertiary-page-contained organization-structure-content" orgId={orgId}>
+      <TertiaryPageHeader
+        actions={memberList.length > 0 ? (
           <div className="org-chart-controls org-page-actions">
+            <button
+              className={adjusting ? "primary small-button" : "secondary small-button"}
+              type="button"
+              onClick={() => {
+                setAdjusting((value) => !value);
+                setEditingMemberId(null);
+              }}
+            >
+              {adjusting ? "完成调整" : "调整架构"}
+            </button>
             <button className="secondary small-button" type="button" onClick={() => setZoom((value) => Math.min(value * 1.2, 1.8))}>+</button>
             <button className="secondary small-button" type="button" onClick={() => setZoom((value) => Math.max(value * 0.8, 0.35))}>-</button>
             <button className="secondary small-button" type="button" onClick={fitChart}>Fit</button>
           </div>
-        )}
-      </header>
-      {agents.error && <ErrorNotice error={agents.error} />}
-      {agents.isSuccess && agentList.length === 0 ? (
+        ) : undefined}
+        eyebrow="Organization"
+        supporting="Human 与 Agent 共用一套汇报关系。可缩放或左右滚动查看完整架构。"
+        title="组织架构"
+        variant="canvas"
+      />
+      {hierarchy.error && <ErrorNotice error={hierarchy.error} />}
+      {hierarchy.isSuccess && memberList.length === 0 ? (
         <section className="panel organization-empty-state">
-          <p className="muted">暂无智能体。创建首个智能体以建立组织架构。</p>
+          <p className="muted">暂无组织成员。邀请 Human 或创建智能体以建立组织架构。</p>
           <Link className="button" to={`/orgs/${orgId}/agents/new`}>新建智能体</Link>
         </section>
       ) : (
-        <section className="organization-chart" ref={viewportRef}>
-          <svg aria-hidden className="organization-chart-edges">
-            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-              {edges.map(({ parent, child }) => {
-                const x1 = parent.x + ORG_CARD_WIDTH / 2;
-                const y1 = parent.y + ORG_CARD_HEIGHT;
-                const x2 = child.x + ORG_CARD_WIDTH / 2;
-                const y2 = child.y;
-                const midY = (y1 + y2) / 2;
-                return (
-                  <path
-                    d={`M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`}
-                    fill="none"
-                    key={`${parent.agent.id}-${child.agent.id}`}
-                  />
-                );
-              })}
-            </g>
-          </svg>
+        <section aria-label="组织关系画布" className="organization-chart" ref={viewportRef}>
           <div
-            className="organization-chart-layer"
-            style={{
-              height: bounds.height,
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              width: bounds.width,
-            }}
+            className="organization-chart-canvas"
+            data-testid="organization-chart-canvas"
+            style={{ height: canvasHeight, width: canvasWidth }}
           >
-            {nodes.map(({ agent, x, y }) => (
-              <Link
-                aria-label={`${agent.name} ${agent.reportsTo ? `向 ${agentNameById.get(agent.reportsTo) ?? "未知智能体"} 汇报` : "直属组织"}`}
-                className="organization-chart-card"
-                key={agent.id}
-                style={{ left: x, top: y }}
-                to={`/orgs/${orgId}/agents/${agent.id}`}
-              >
-                <div className="organization-chart-avatar">{agent.name.slice(0, 1).toUpperCase()}</div>
-                <div className="organization-chart-copy">
-                  <strong>{agent.name}</strong>
-                  <span>{agent.title ?? agent.role}</span>
-                  <small>{agent.agentRuntimeType ?? "runtime"}</small>
-                  <small>{agent.reportsTo ? `向 ${agentNameById.get(agent.reportsTo) ?? "未知智能体"} 汇报` : "直属组织"}</small>
-                </div>
-                <Badge>{statusLabel(agent.status)}</Badge>
-              </Link>
-            ))}
+            <svg
+              aria-hidden
+              className="organization-chart-edges"
+              style={{ height: canvasHeight, width: canvasWidth }}
+            >
+              <g transform={`translate(${canvasOffset.x}, ${canvasOffset.y}) scale(${zoom})`}>
+                {edges.map(({ parent, child }) => {
+                  const x1 = parent.x + ORG_CARD_WIDTH / 2;
+                  const y1 = parent.y + ORG_CARD_HEIGHT;
+                  const x2 = child.x + ORG_CARD_WIDTH / 2;
+                  const y2 = child.y;
+                  const midY = (y1 + y2) / 2;
+                  return (
+                    <path
+                      d={`M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`}
+                      fill="none"
+                      key={`${parent.member.id}-${child.member.id}`}
+                    />
+                  );
+                })}
+              </g>
+            </svg>
+            <div
+              className="organization-chart-layer"
+              style={{
+                height: bounds.height,
+                left: canvasOffset.x,
+                top: canvasOffset.y,
+                transform: `scale(${zoom})`,
+                width: bounds.width,
+              }}
+            >
+              {nodes.map(({ member, x, y }) => (
+                <article
+                  aria-label={`${member.displayName} ${member.reportsTo ? `向 ${memberNameById.get(member.reportsTo) ?? "未知成员"} 汇报` : "组织负责人"}`}
+                  className={`organization-chart-card ${adjusting ? "adjusting" : ""}`}
+                  key={member.id}
+                  style={{ left: x, top: y }}
+                >
+                  <div className={`organization-chart-avatar ${member.principalType}`}>{member.displayName.slice(0, 1).toUpperCase()}</div>
+                  <div className="organization-chart-copy">
+                    {member.principalType === "agent" ? (
+                      <Link to={`/orgs/${orgId}/agents/${member.principalId}`}>{member.displayName}</Link>
+                    ) : (
+                      <strong>{member.displayName}</strong>
+                    )}
+                    <span>{member.principalType === "agent" ? "Agent" : "Human"} · {member.role}</span>
+                    <small>{member.reportsTo ? `向 ${memberNameById.get(member.reportsTo) ?? "未知成员"} 汇报` : "组织负责人"}</small>
+                  </div>
+                  <Badge>{member.status === "active" ? "有效" : member.status}</Badge>
+                  {adjusting && member.role !== "owner" ? (
+                    <button className="organization-chart-manager-button" type="button" onClick={() => openManagerEditor(member)}>
+                      调整上级
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
           </div>
         </section>
       )}
+      {editingMember ? (
+        <div className="modal-backdrop" role="presentation">
+          <form
+            aria-label="调整上级"
+            className="modal-card organization-manager-dialog"
+            onSubmit={(event) => {
+              event.preventDefault();
+              updateManager.mutate();
+            }}
+          >
+            <div>
+              <p className="eyebrow">Reporting line</p>
+              <h2>调整 {editingMember.displayName} 的上级</h2>
+              <p className="muted">Human 与 Agent 都可以作为上级。系统会阻止循环汇报关系。</p>
+            </div>
+            <label>
+              直属上级
+              <select value={managerId} onChange={(event) => setManagerId(event.target.value)} required>
+                <option value="" disabled>请选择上级</option>
+                {memberList
+                  .filter((member) => member.status === "active" && !excludedManagerIds.has(member.id))
+                  .map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.displayName}（{member.principalType === "agent" ? "Agent" : "Human"}）
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {updateManager.error && <ErrorNotice error={updateManager.error} />}
+            <div className="modal-actions">
+              <button className="secondary" type="button" onClick={() => setEditingMemberId(null)}>取消</button>
+              <button disabled={updateManager.isPending || !managerId} type="submit">保存调整</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </OrgWorkspace>
   );
 }
@@ -358,7 +512,13 @@ export function OrganizationStructurePage() {
 const RESOURCE_KINDS: OrganizationResource["kind"][] = ["file", "directory", "url", "connector_object"];
 
 function organizationResourceKindLabel(kind: OrganizationResource["kind"]): string {
-  return kind;
+  const labels: Record<OrganizationResource["kind"], string> = {
+    file: "文件",
+    directory: "目录",
+    url: "链接",
+    connector_object: "连接器对象",
+  };
+  return labels[kind];
 }
 
 function organizationResourceKindIcon(kind: OrganizationResource["kind"]): string {
@@ -383,6 +543,10 @@ export function OrganizationResourcesPage() {
   const [description, setDescription] = useState("");
   const [formError, setFormError] = useState("");
   const resourceRows = Array.isArray(resources.data) ? resources.data : [];
+  const resourceGroups = RESOURCE_KINDS.map((kind) => ({
+    kind,
+    rows: resourceRows.filter((resource) => resource.kind === kind),
+  })).filter((group) => group.rows.length > 0);
 
   function resetForm() {
     setEditing(null);
@@ -444,72 +608,59 @@ export function OrganizationResourcesPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <section className="org-resource-hero">
-        <div className="org-resource-hero-copy">
-          <div className="org-resource-title-block">
-            <p className="eyebrow">Resources</p>
-            <h1>资源</h1>
-          </div>
-          <p>
-            维护组织内可复用的代码库、文件、链接和连接器对象。资源在这里统一登记，再由项目按角色说明进行引用。
-          </p>
-          <div className="org-resource-chip-row">
-            <span>{resourceRows.length} 个目录项</span>
-            <span>项目引用时补充角色和说明</span>
-          </div>
-          <div className="org-resource-actions">
-            <button className="secondary small-button" type="button" onClick={openCreateResourceDialog}>添加资源</button>
-            <Link className="button secondary small-button" to={`/orgs/${orgId}/workspaces`}>浏览工作区</Link>
-          </div>
-        </div>
-        <aside className="org-resource-context-card">
-          <p className="eyebrow">智能体运行上下文</p>
-          <h2>先建目录，再按项目引用。</h2>
-          <p>
-            组织资源保持可复用。项目级引用只负责指向这些资源，并说明该项目希望智能体如何使用。
-          </p>
-        </aside>
-      </section>
+      <TertiaryPageHeader
+        actions={<div className="org-resource-actions">
+          <button className="org-primary-action" type="button" onClick={openCreateResourceDialog}>添加资源</button>
+          <Link className="button secondary small-button" to={`/orgs/${orgId}/workspaces`}>浏览工作区</Link>
+        </div>}
+        eyebrow="Resources"
+        supporting="维护组织内可复用的代码库、文件、链接和连接器对象。资源在这里统一登记，再由项目按角色说明进行引用。"
+        title="资源"
+      />
       {resources.error && <ErrorNotice error={resources.error} />}
-      <section className="panel org-resource-catalog-card">
-        <div className="panel-heading">
-          <div>
-            <h2>目录</h2>
-            <p className="muted">使用稳定名称和明确定位符，便于智能体可靠引用资源。</p>
-          </div>
-          <Badge>{resourceRows.length}</Badge>
-        </div>
+      <section className="panel org-resource-catalog-card" aria-label="资源列表">
         {resources.isSuccess && resourceRows.length === 0 ? (
           <div className="org-resource-empty" aria-label="No resources" />
         ) : (
-          <div className="org-resource-grid">
-            {resourceRows.map((resource) => (
-              <article className="org-resource-card" key={resource.id}>
-                <div className="org-resource-card-header">
-                  <span className={`org-resource-kind-icon org-resource-kind-${resource.kind}`} aria-hidden="true">
-                    {organizationResourceKindIcon(resource.kind)}
-                  </span>
-                  <div>
-                    <h3>{resource.name}</h3>
-                    <span>{organizationResourceKindLabel(resource.kind)}</span>
-                  </div>
+          <div className="org-resource-groups">
+            {resourceGroups.map((group) => (
+              <section
+                aria-label={`${organizationResourceKindLabel(group.kind)} · ${group.rows.length}`}
+                className="org-resource-group"
+                key={group.kind}
+              >
+                <h2 className="org-resource-group-heading" id={`resource-group-${group.kind}`}>
+                  <span>{organizationResourceKindLabel(group.kind)}</span>
+                  <span aria-hidden="true" className="org-resource-group-count">{group.rows.length}</span>
+                </h2>
+                <div className="org-resource-grid">
+                  {group.rows.map((resource) => (
+                    <article className="org-resource-card" key={resource.id}>
+                      <div className="org-resource-card-header">
+                        <span className={`org-resource-kind-icon org-resource-kind-${resource.kind}`} aria-hidden="true">
+                          {organizationResourceKindIcon(resource.kind)}
+                        </span>
+                        <h3 title={resource.name}>{resource.name}</h3>
+                      </div>
+                      <p className="org-resource-locator" title={resource.locator}>{resource.locator}</p>
+                      {resource.description && <p className="org-resource-description" title={resource.description}>{resource.description}</p>}
+                      <div className="org-resource-card-actions">
+                        <button className="secondary small-button" onClick={() => editResource(resource)} type="button">
+                          编辑
+                        </button>
+                        <button
+                          className="danger small-button"
+                          disabled={deleteResource.isPending}
+                          onClick={() => deleteResource.mutate(resource.id)}
+                          type="button"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-                <p className="org-resource-locator">{resource.locator}</p>
-                {resource.description && <p className="org-resource-description">{resource.description}</p>}
-                <div className="org-resource-card-actions">
-                  <button className="secondary small-button" onClick={() => editResource(resource)} type="button">
-                    编辑
-                  </button>
-                  <button
-                    className="danger small-button"
-                    disabled={deleteResource.isPending}
-                    onClick={() => deleteResource.mutate(resource.id)}
-                    type="button"
-                  >
-                    删除
-                  </button>
-                </div>
-              </article>
+              </section>
             ))}
           </div>
         )}
@@ -732,13 +883,6 @@ function organizationSkillSourceText(value: string | null | undefined, builtIn: 
   return sourceLabel(value);
 }
 
-function organizationSkillReadableSummary(skill: OrganizationSkillListItem, content?: string | null): string {
-  if (skill.description?.trim()) return skill.description.trim();
-  if (!content?.trim()) return "";
-  const withoutFrontmatter = content.replace(/^---[\s\S]*?---\s*/, "").trim();
-  const firstParagraph = withoutFrontmatter.split(/\n\s*\n/).find((paragraph) => paragraph.trim());
-  return firstParagraph?.replace(/\s+/g, " ").trim().slice(0, 360) ?? "";
-}
 
 function organizationSkillSections(skills: OrganizationSkillListItem[]) {
   return [
@@ -803,12 +947,6 @@ export function OrganizationSkillsPage() {
     queryFn: () => organizationSkillsApi.readFile(orgId, selectedSkill!.id, selectedPath),
     enabled: Boolean(selectedSkill),
   });
-  const readableSkillSummary = selectedSkill ? organizationSkillReadableSummary(selectedSkill, skillFile.data?.content) : "";
-  const headerSkillDescription = selectedSkill?.description?.trim() || "";
-  const showReadableSkillSummary = Boolean(
-    readableSkillSummary
-      && readableSkillSummary.trim() !== headerSkillDescription
-  );
   const updateStatus = useQuery({
     queryKey: ["organization-skill-update-status", orgId, selectedSkill?.id],
     queryFn: () => organizationSkillsApi.updateStatus(orgId, selectedSkill!.id),
@@ -953,22 +1091,21 @@ export function OrganizationSkillsPage() {
   }
 
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full tertiary-page-contained organization-skills-content" orgId={orgId}>
+      <TertiaryPageHeader
+        eyebrow="Skills"
+        supporting={`${skillRows.length} 个可用`}
+        title="技能"
+      />
       {skills.error && <ErrorNotice error={skills.error} />}
       <div className="organization-skills-shell">
         <aside className="organization-skills-sidebar">
-          <div className="organization-skills-sidebar-header">
-            <div>
-              <p className="eyebrow">Skills</p>
-              <h1>技能</h1>
-              <p>{skillRows.length} 个可用</p>
-            </div>
-            <div className="row-actions">
-              <button className="secondary small-button" onClick={() => setCreateOpen(true)} type="button">创建</button>
+          <div className="organization-skill-list-tools">
+            <div className="skills-page-actions" role="group" aria-label="技能管理">
+              <button className="org-primary-action" onClick={() => setCreateOpen(true)} type="button">创建技能</button>
               <button className="secondary small-button" onClick={() => setImportOpen(true)} type="button">导入</button>
               <button className="secondary small-button" onClick={() => setScanOpen(true)} type="button">扫描</button>
             </div>
-          </div>
           <label className="organization-skill-search">
             <span>搜索技能</span>
             <input
@@ -978,6 +1115,7 @@ export function OrganizationSkillsPage() {
               onChange={(event) => setSkillFilter(event.target.value)}
             />
           </label>
+          </div>
           <div className="organization-skill-list-panel">
             {skills.isLoading && <p className="muted">加载技能中...</p>}
             {filteredSkillSections.map((section) => (
@@ -1010,91 +1148,70 @@ export function OrganizationSkillsPage() {
         <section className="organization-skill-pane">
           {selectedSkill ? (
             <>
-              <div className="organization-skill-pane-header">
-                <div>
-                  <div className="organization-skill-title-row">
-                    <h2>{selectedSkill.name}</h2>
-                    <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</Badge>
-                    <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
-                  </div>
-                </div>
-                <div className="row-actions">
-                  <button className="secondary small-button" onClick={() => void updateStatus.refetch()} type="button">检查更新</button>
-                  <button
-                    className="secondary small-button"
-                    disabled={installUpdate.isPending || !updateStatus.data?.hasUpdate}
-                    onClick={() => installUpdate.mutate(selectedSkill.id)}
-                    type="button"
-                  >
-                    安装更新
-                  </button>
-                  <button
-                    className="danger small-button"
-                    disabled={deleteSkill.isPending || !selectedSkill.editable}
-                    onClick={() => deleteSkill.mutate(selectedSkill.id)}
-                    type="button"
-                  >
-                    删除
-                  </button>
-                </div>
-              </div>
-              {skillDetail.error && <ErrorNotice error={skillDetail.error} />}
-              {skillFile.error && <ErrorNotice error={skillFile.error} />}
-              {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
-              {installUpdate.error && <ErrorNotice error={installUpdate.error} />}
-              {showReadableSkillSummary && (
-                <section className="organization-skill-readable-summary">
-                  <span>技能说明</span>
-                  <p>{readableSkillSummary}</p>
-                </section>
-              )}
-              <div className="organization-skill-info-grid">
-                <div className="organization-skill-info-grid-full">
-                  <span>来源路径</span>
-                  <strong title={selectedSkill.sourcePath ?? "未设置"}>{selectedSkill.sourcePath ?? "未设置"}</strong>
-                </div>
-                <div>
-                  <span>工作区编辑路径</span>
-                  <strong title={selectedSkill.workspaceEditPath ?? "只读或未设置"}>{selectedSkill.workspaceEditPath ?? "只读或未设置"}</strong>
-                </div>
-                <div>
-                  <span>兼容性</span>
-                  <strong>{selectedSkill.compatibility}</strong>
-                </div>
-              </div>
-              {(skillDetail.data?.usedByAgents ?? []).length > 0 && (
-                <section className="organization-skill-usage">
-                  <h3>使用中的智能体</h3>
+              <div className="organization-skill-overview">
+                <div className="organization-skill-pane-header">
                   <div>
-                    {skillDetail.data?.usedByAgents.map((agent) => (
-                      <span key={agent.id}>
-                        <strong>{agent.name}</strong>
-                        <small>{agent.desired ? "已启用" : "可用"} · {agent.actualState ? statusLabel(agent.actualState) : agent.agentRuntimeType}</small>
-                      </span>
-                    ))}
-                  </div>
-                </section>
-              )}
-              <div className="organization-skill-content-layout">
-                <aside className="organization-skill-files">
-                  <div className="organization-skill-files-header">
-                    <h3>文件</h3>
-                    <span>{selectedSkill.fileInventory.length}</span>
-                  </div>
-                  <SkillFileTree
-                    expandedDirs={new Set(expandedSkillDirs[selectedSkill.id] ?? [])}
-                    files={selectedSkill.fileInventory}
-                    selectedPath={selectedPath}
-                    onSelect={(path) => selectSkillFile(selectedSkill.id, path)}
-                    onToggle={(path) => toggleSkillDirectory(selectedSkill.id, path)}
-                  />
-                </aside>
-                <div className="organization-skill-file-panel">
-                  <div className="organization-skill-file-toolbar">
-                    <div>
-                      <h3>{selectedPath}</h3>
-                      <p>{skillFile.data?.editable ? "可编辑" : "只读"}</p>
+                    <div className="organization-skill-title-row">
+                      <h2>{selectedSkill.name}</h2>
+                      <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</Badge>
+                      <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
                     </div>
+                  </div>
+                  <div className="row-actions">
+                    <button className="secondary small-button" onClick={() => void updateStatus.refetch()} type="button">检查更新</button>
+                    <button
+                      className="secondary small-button"
+                      disabled={installUpdate.isPending || !updateStatus.data?.hasUpdate}
+                      onClick={() => installUpdate.mutate(selectedSkill.id)}
+                      type="button"
+                    >
+                      安装更新
+                    </button>
+                    <button
+                      className="danger small-button"
+                      disabled={deleteSkill.isPending || !selectedSkill.editable}
+                      onClick={() => deleteSkill.mutate(selectedSkill.id)}
+                      type="button"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+                <div className="organization-skill-info-grid">
+                  <div className="organization-skill-info-grid-full">
+                    <span>来源路径</span>
+                    <strong title={selectedSkill.sourcePath ?? "未设置"}>{selectedSkill.sourcePath ?? "未设置"}</strong>
+                  </div>
+                  <div>
+                    <span>工作区编辑路径</span>
+                    <strong title={selectedSkill.workspaceEditPath ?? "只读或未设置"}>{selectedSkill.workspaceEditPath ?? "只读或未设置"}</strong>
+                  </div>
+                  <div>
+                    <span>兼容性</span>
+                    <strong>{selectedSkill.compatibility}</strong>
+                  </div>
+                </div>
+              </div>
+              <div className="organization-skill-body">
+                {skillDetail.error && <ErrorNotice error={skillDetail.error} />}
+                {skillFile.error && <ErrorNotice error={skillFile.error} />}
+                {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
+                {installUpdate.error && <ErrorNotice error={installUpdate.error} />}
+                <FileBrowser
+                  className="organization-skill-content-layout"
+                  fileTitle={selectedPath}
+                  fileStatus={skillFile.data?.editable ? "可编辑" : "只读"}
+                  sidebarCount={selectedSkill.fileInventory.length}
+                  sidebar={(
+                    <SkillFileTree
+                      expandedDirs={new Set(expandedSkillDirs[selectedSkill.id] ?? [])}
+                      files={selectedSkill.fileInventory}
+                      selectedPath={selectedPath}
+                      onSelect={(path) => selectSkillFile(selectedSkill.id, path)}
+                      onToggle={(path) => toggleSkillDirectory(selectedSkill.id, path)}
+                    />
+                  )}
+                  actions={(
                     <button
                       disabled={!selectedSkill.editable || !skillFile.data?.editable || saveFile.isPending}
                       onClick={() => saveFile.mutate()}
@@ -1102,7 +1219,8 @@ export function OrganizationSkillsPage() {
                     >
                       保存
                     </button>
-                  </div>
+                  )}
+                >
                   <textarea
                     aria-label={selectedPath}
                     className="skill-yaml-textarea organization-skill-editor"
@@ -1111,11 +1229,11 @@ export function OrganizationSkillsPage() {
                     onChange={(event) => setDraftContent(event.target.value)}
                   />
                   {saveFile.error && <ErrorNotice error={saveFile.error} />}
-                </div>
+                </FileBrowser>
               </div>
             </>
           ) : (
-            <p className="muted">暂无组织技能。</p>
+            <div className="organization-skill-overview"><p className="muted">暂无组织技能。</p></div>
           )}
         </section>
       </div>
@@ -1387,27 +1505,32 @@ export function OrganizationWorkspacesPage() {
   const selectedDetail = selectedFile.data as OrganizationWorkspaceFileDetail | undefined;
 
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Workspaces</p>
-          <h1>工作区</h1>
-          <p className="muted">查看组织文件、运行产物和智能体配置。</p>
-        </div>
-        <button className="org-primary-action" onClick={refreshWorkspace} type="button">刷新</button>
-      </header>
+    <OrgWorkspace contentClassName="org-content-full tertiary-page-contained organization-fullscreen-detail organization-workspaces-content" orgId={orgId}>
+      <TertiaryPageHeader
+        actions={<button className="org-primary-action" onClick={refreshWorkspace} type="button">刷新</button>}
+        eyebrow="Workspaces"
+        supporting="查看组织文件、运行产物和智能体配置。"
+        title="工作区"
+      />
       {projects.error && <ErrorNotice error={projects.error} />}
       {rootFiles.error && <ErrorNotice error={rootFiles.error} />}
       {selectedFile.error && <ErrorNotice error={selectedFile.error} />}
-      <div className="workspace-shell-layout">
-        <section className="workspace-files-card" data-testid="org-workspaces-files-card">
-          <div className="workspace-card-header">
-            <div>
-              <h2>文件</h2>
-              <p>{rootFiles.data?.rootExists === false ? "工作区不存在" : "组织工作区根目录"}</p>
-            </div>
-            <Badge>{sortedWorkspaceTree.length}</Badge>
-          </div>
+      <FileBrowser
+        actions={(
+          <>
+            {selectedPath && <span className="workspace-format-pill">{displayWorkspaceFileFormat(selectedPath, selectedDetail)}</span>}
+            <button disabled title="当前暂只支持工作区预览" type="button">保存</button>
+          </>
+        )}
+        className="workspace-shell-layout"
+        fileStatus={selectedPath ? "只读" : "从左侧选择文件"}
+        fileTitle={workspaceHeaderPath(selectedPath)}
+        framed
+        sidebarCount={sortedWorkspaceTree.length}
+        sidebarWidth={300}
+        treeTestId="org-workspaces-files-card"
+        viewerTestId="org-workspaces-editor-card"
+        sidebar={(
           <div className="workspace-files-scroll">
             {rootFiles.isLoading && <p className="muted">加载工作区中...</p>}
             {rootFiles.data?.message && <p className="muted">{rootFiles.data.message}</p>}
@@ -1424,41 +1547,28 @@ export function OrganizationWorkspacesPage() {
               ))}
             </ul>
           </div>
-        </section>
-        <section className="workspace-editor-card" data-testid="org-workspaces-editor-card">
-          <div className="workspace-card-header workspace-editor-header">
-            <div>
-              <h2>内容</h2>
-              <p>{workspaceHeaderPath(selectedPath)}</p>
-            </div>
-            <div className="workspace-editor-actions">
-              {selectedPath && <span className="workspace-format-pill">{displayWorkspaceFileFormat(selectedPath, selectedDetail)}</span>}
-              <button disabled title="当前暂只支持工作区预览" type="button">保存</button>
-            </div>
+        )}
+      >
+        {!selectedPath ? (
+          <p className="muted">从左侧选择文件查看内容。</p>
+        ) : selectedFile.isLoading ? (
+          <p className="muted">加载文件中...</p>
+        ) : selectedDetail?.previewKind === "image" && selectedDetail.contentPath ? (
+          <div className="workspace-image-preview">
+            <img alt={selectedPath} src={selectedDetail.contentPath} />
           </div>
-          <div className="workspace-editor-body">
-            {!selectedPath ? (
-              <p className="muted">从左侧选择文件查看内容。</p>
-            ) : selectedFile.isLoading ? (
-              <p className="muted">加载文件中...</p>
-            ) : selectedDetail?.previewKind === "image" && selectedDetail.contentPath ? (
-              <div className="workspace-image-preview">
-                <img alt={selectedPath} src={selectedDetail.contentPath} />
-              </div>
-            ) : selectedDetail?.previewKind === "binary" ? (
-              <p className="muted">{selectedDetail.message ?? "二进制文件暂不预览。"}</p>
-            ) : (
-              <textarea
-                aria-label="工作区文件内容"
-                className="workspace-text-editor"
-                readOnly
-                spellCheck={false}
-                value={selectedDetail?.content ?? ""}
-              />
-            )}
-          </div>
-        </section>
-      </div>
+        ) : selectedDetail?.previewKind === "binary" ? (
+          <p className="muted">{selectedDetail.message ?? "二进制文件暂不预览。"}</p>
+        ) : (
+          <textarea
+            aria-label="工作区文件内容"
+            className="workspace-text-editor"
+            readOnly
+            spellCheck={false}
+            value={selectedDetail?.content ?? ""}
+          />
+        )}
+      </FileBrowser>
     </OrgWorkspace>
   );
 }
@@ -1472,35 +1582,40 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
   return (
     <aside className="org-sidebar">
       <p className="org-sidebar-label">Organization</p>
+      <h2>组织</h2>
       <nav className="local-nav" aria-label="组织导航">
         <section className="local-nav-section">
-          <h2>组织</h2>
+          <h2>组织管理</h2>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/structure`}>
-            <span aria-hidden="true" className="context-entry-icon">O</span>
+            <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="organization" /></span>
             <span>组织架构</span>
           </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/members`}>
+            <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="members" /></span>
+            <span>成员</span>
+          </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>
-            <span aria-hidden="true" className="context-entry-icon">H</span>
+            <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="heartbeat" /></span>
             <span>心跳</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/costs`}>
-            <span aria-hidden="true" className="context-entry-icon">C</span>
+            <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="costs" /></span>
             <span>成本</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/resources`}>
-            <span aria-hidden="true" className="context-entry-icon">R</span>
+            <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="resources" /></span>
             <span>资源</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/workspaces`}>
-            <span aria-hidden="true" className="context-entry-icon">W</span>
+            <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="workspaces" /></span>
             <span>工作区</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/goals`}>
-            <span aria-hidden="true" className="context-entry-icon">G</span>
+            <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="goals" /></span>
             <span>目标</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/skills`}>
-            <span aria-hidden="true" className="context-entry-icon">K</span>
+            <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="skills" /></span>
             <span>技能</span>
           </NavLink>
         </section>
@@ -1519,7 +1634,7 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
                   className="context-entry-icon project-entry-icon"
                   style={{ background: project.color ?? undefined }}
                 >
-                  P
+                  <SidebarIcon name="projects" />
                 </span>
                 <span>{project.name}</span>
               </NavLink>
@@ -1534,11 +1649,14 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
 
 export function OrgWorkspace({ children, contentClassName = "", orgId }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
   const isFullBleed = contentClassName.split(" ").includes("org-content-full");
+  const isContained = contentClassName.split(" ").includes("tertiary-page-contained");
   return (
     <div className="org-workspace">
       <OrgNavigation orgId={orgId} />
-      <div className={`org-content ${contentClassName}`}>
-        {isFullBleed ? children : <div className="tertiary-detail-frame">{children}</div>}
+      <div className={`org-content ${contentClassName}${isFullBleed ? " tertiary-page-content" : ""}`}>
+        {isFullBleed
+          ? <TertiaryPageFrame contained={isContained}>{children}</TertiaryPageFrame>
+          : <div className="tertiary-detail-frame">{children}</div>}
       </div>
     </div>
   );

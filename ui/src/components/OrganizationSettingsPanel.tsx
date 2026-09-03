@@ -7,10 +7,12 @@ import { PluginsPage } from "../pages/PluginsPage";
 import { ErrorNotice } from "./ErrorNotice";
 import { RuntimeProviderSettings } from "./RuntimeProviderSettings";
 import { InstanceHeartbeatsPanel } from "../pages/InstanceHeartbeatsPage";
+import { AccountSettingsSection } from "./AccountSettingsSection";
 
-type SettingsSection = "general" | "providers" | "heartbeats" | "storage" | "plugins" | "about";
+export type SettingsSection = "account" | "general" | "providers" | "heartbeats" | "storage" | "plugins" | "about";
 
 const SETTINGS_SECTIONS: Array<{ description: string; eyebrow: string; id: SettingsSection; label: string }> = [
+  { id: "account", eyebrow: "Human Account", label: "账户", description: "登录身份和 Session。" },
   { id: "providers", eyebrow: "LLM Providers", label: "供应商", description: "全局 LLM provider 和 model。" },
   { id: "heartbeats", eyebrow: "Heartbeat Monitor", label: "心跳", description: "智能体状态检测和运行诊断。" },
   { id: "storage", eyebrow: "Storage", label: "存储", description: "附件和产物存储配置。" },
@@ -69,8 +71,14 @@ function StorageSettingsSection({ current }: { current: (typeof SETTINGS_SECTION
   );
 }
 
-export function OrganizationSettingsPanel({ orgId }: { orgId?: string }) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("providers");
+export function OrganizationSettingsPanel({
+  initialSection = "providers",
+  orgId,
+}: {
+  initialSection?: SettingsSection;
+  orgId?: string;
+}) {
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [locale, setLocale] = useState<AppLocale>(() => getLocalePreference());
   const current = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
 
@@ -95,7 +103,9 @@ export function OrganizationSettingsPanel({ orgId }: { orgId?: string }) {
         ))}
       </aside>
       <div className="settings-section-content">
-        {activeSection === "providers" ? (
+        {activeSection === "account" ? (
+          <AccountSettingsSection />
+        ) : activeSection === "providers" ? (
           <RuntimeProviderSettings orgId={orgId} />
         ) : activeSection === "heartbeats" ? (
           <InstanceHeartbeatsPanel />

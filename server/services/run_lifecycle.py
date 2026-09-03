@@ -9,6 +9,7 @@ from packages.database.schema import HeartbeatRun as HeartbeatRunRow
 from packages.database.schema import Issue as IssueRow
 from packages.shared.constants.heartbeat import HeartbeatRunStatus
 from packages.shared.types.heartbeat import HeartbeatRun
+from server.identity.system_access import SystemOperationAccess
 
 if TYPE_CHECKING:
     from .issue_completion import IssueCompletionResult
@@ -60,6 +61,17 @@ class RunFinalizationService:
 
     def __init__(self, host: RunLifecycleHost) -> None:
         self._host = host
+        self._system_access = SystemOperationAccess()
+
+    def _authorize(self, run: HeartbeatRunRow) -> None:
+        self._system_access.require(
+            system_id="run_finalization",
+            org_id=run.org_id,
+            permission="runs:finalize",
+            reason="Finalize Run state and terminal effects",
+            entity_type="run",
+            entity_id=run.id,
+        )
 
     async def transition(
         self,
@@ -70,6 +82,12 @@ class RunFinalizationService:
         expected_statuses: Sequence[str] = ("running",),
         expected_owner_token: str | None = None,
     ) -> HeartbeatRunRow | None:
+        from packages.database.queries.heartbeat import get_run
+
+        run = await get_run(self._host._session, run_id)
+        if run is None:
+            return None
+        self._authorize(run)
         return await transition_run_to_terminal(
             self._host._session,
             run_id,
@@ -89,6 +107,7 @@ class RunFinalizationService:
         result: Any,
         sequence: int,
     ) -> HeartbeatRunRow:
+        self._authorize(running)
         return await self._host._complete_finalized_run_impl(
             agent=agent,
             running=running,
@@ -105,6 +124,7 @@ class RunFinalizationService:
         result: Any | None = None,
         sequence: int | None = None,
     ) -> HeartbeatRunRow:
+        self._authorize(run)
         return await self._host._reconcile_terminal_effects_impl(
             run,
             result=result,
@@ -114,11 +134,13 @@ class RunFinalizationService:
     async def restore_system_blocked_issue_after_recovery(
         self, run: HeartbeatRunRow
     ) -> bool:
+        self._authorize(run)
         return await self._host._restore_system_blocked_issue_after_recovery(run)
 
     async def finalize_parent_closeout(
         self, run: HeartbeatRunRow, issue: IssueRow
     ) -> "ParentCloseoutResult":
+        self._authorize(run)
         from .parent_closeout_governance import ParentCloseoutGovernance
 
         result = await ParentCloseoutGovernance(
@@ -135,6 +157,8 @@ class RunFinalizationService:
     ) -> "ParentCloseoutResult":
         """Validate policy evidence before the Run terminal CAS."""
 
+        self._authorize(run)
+
         from .parent_closeout_governance import ParentCloseoutGovernance
 
         return await ParentCloseoutGovernance(
@@ -144,6 +168,7 @@ class RunFinalizationService:
     async def finalize_issue_completion(
         self, run: HeartbeatRunRow, issue: IssueRow
     ) -> "IssueCompletionResult":
+        self._authorize(run)
         from .issue_completion import IssueCompletionGovernance
 
         result = await IssueCompletionGovernance(self._host._session).validate(
@@ -158,6 +183,7 @@ class RunFinalizationService:
     async def validate_issue_completion(
         self, run: HeartbeatRunRow, issue: IssueRow
     ) -> "IssueCompletionResult":
+        self._authorize(run)
         from .issue_completion import IssueCompletionGovernance
 
         return await IssueCompletionGovernance(self._host._session).validate(
@@ -167,6 +193,7 @@ class RunFinalizationService:
     async def block_failed_issue_completion(
         self, run: HeartbeatRunRow, issue: IssueRow
     ) -> bool:
+        self._authorize(run)
         from .issue_completion import IssueCompletionGovernance
 
         return await IssueCompletionGovernance(
@@ -179,6 +206,7 @@ class RunRecoveryService:
 
     def __init__(self, host: RunLifecycleHost) -> None:
         self._host = host
+        self._system_access = SystemOperationAccess()
 
     async def recover(
         self,
@@ -189,4 +217,14 @@ class RunRecoveryService:
         return await self._host._recover_orphaned_runs_impl(
             require_process_loss=require_process_loss,
             run_ids=run_ids,
+        )
+
+    def authorize(self, run: HeartbeatRunRow) -> None:
+        self._system_access.require(
+            system_id="run_recovery",
+            org_id=run.org_id,
+            permission="runs:recover",
+            reason="Recover persisted Run execution state",
+            entity_type="run",
+            entity_id=run.id,
         )

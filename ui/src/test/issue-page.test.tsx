@@ -32,6 +32,100 @@ async function ensureRunExpanded(region: HTMLElement, runId: string) {
 
 }
 
+it("lets the assigned Human execute an issue without creating a Run", async () => {
+  let status = "todo";
+  const issue = {
+    id: "human-issue",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "人工确认发布",
+    description: "确认发布窗口",
+    status,
+    priority: "medium",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: null,
+    assigneeUserId: "test-user",
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "delegation",
+    originId: null,
+    originRunId: null,
+    closeoutPolicy: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "2026-08-28T10:00:00Z",
+    updatedAt: "2026-08-28T10:00:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/issues/human-issue" && init?.method === "GET") {
+      return respond({ ...issue, status });
+    }
+    if (path === "/api/issues/human-issue" && init?.method === "PATCH") {
+      const payload = JSON.parse(String(init.body));
+      status = payload.status;
+      return respond({ ...issue, status });
+    }
+    if (path === "/api/orgs/org-1/hierarchy") {
+      return respond([
+        {
+          id: "role-human",
+          orgId: "org-1",
+          principalType: "user",
+          principalId: "test-user",
+          displayName: "Test User",
+          role: "member",
+          status: "active",
+          reportsTo: null,
+        },
+      ]);
+    }
+    if (path === "/api/issues/human-issue/children?includeWorkProducts=true" && init?.method === "GET") {
+      return respond({
+        parent: issue,
+        children: [
+          {
+            ...issue,
+            id: "human-child",
+            identifier: "OCT-2",
+            title: "人工核对",
+            parentId: "human-issue",
+            lastCloseout: null,
+          },
+        ],
+        activeChildCount: 1,
+        settledChildCount: 0,
+        totalChildCount: 1,
+        includeWorkProducts: true,
+      });
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/human-issue");
+
+  expect(await screen.findByRole("button", { name: "开始处理" })).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("执行者Human · Test User");
+  expect(screen.queryByRole("button", { name: "启动执行" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "签出任务" })).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "已取消" })).toBeDisabled();
+  expect(screen.getByRole("option", { name: "评审中" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "开始处理" }));
+  expect(await screen.findByRole("button", { name: "提交完成" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "提交完成" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/human-issue",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "done" }) }),
+  );
+  expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/execute"))).toBe(false);
+});
+
 it("shows existing run records without collapsing the section by default", async () => {
 
   const longSummary = `任务执行摘要很长，需要默认收起，避免运行记录布局被撑乱。${"继续补充执行细节。".repeat(12)}最终结论。`;
@@ -911,9 +1005,15 @@ it("shows an issue and records comments and review decisions", async () => {
 
   expect(await screen.findByRole("heading", { name: longIssueTitle })).toBeInTheDocument();
 
-  expect(screen.getAllByRole("button", { name: "复制 ID" })).toHaveLength(1);
+  const detailHeader = screen.getByRole("heading", { name: longIssueTitle }).closest("header")!;
+  expect(detailHeader.parentElement).toHaveClass("tertiary-page-shell");
+  expect(document.querySelector(".issue-detail-main")?.closest(".issue-detail-viewport")).toBeInTheDocument();
 
-  expect(screen.getAllByRole("link", { name: "聊天" })).toHaveLength(1);
+  await userEvent.click(screen.getByText("更多"));
+
+  expect(screen.getByRole("menuitem", { name: "复制 ID" })).toBeInTheDocument();
+
+  expect(screen.getByRole("menuitem", { name: "聊天" })).toHaveAttribute("href", "/orgs/org-1/chats");
 
   const properties = screen.getByRole("region", { name: "任务属性" });
 
@@ -962,7 +1062,8 @@ it("shows an issue and records comments and review decisions", async () => {
 
 
   expect(screen.getByText("github #42")).toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("产物 西施介绍.md");
+  expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("产物西施介绍.md");
+  expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("执行者Agent · Builder");
   expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("父任务还需产出");
 
   expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");

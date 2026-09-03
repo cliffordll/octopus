@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -13,10 +14,13 @@ from packages.database.clients import (
 )
 from packages.database.schema import (
     ActivityLog,
+    Agent,
     Base,
     Issue,
     IssueComment,
     Organization,
+    Role,
+    User,
 )
 from server.services.issues import IssueService
 
@@ -52,6 +56,35 @@ async def _seed_org(session: AsyncSession) -> Organization:
     async with async_transaction(session):
         session.add(org)
     return org
+
+
+async def _seed_agent(session: AsyncSession, org_id: str, agent_id: str) -> None:
+    async with async_transaction(session):
+        session.add(Agent(id=agent_id, org_id=org_id, name=agent_id, role="engineer"))
+
+
+async def _seed_reviewer(session: AsyncSession, org_id: str, user_id: str) -> None:
+    now = datetime.now(UTC)
+    async with async_transaction(session):
+        session.add(
+            User(
+                id=user_id,
+                name=user_id,
+                email=f"{user_id}@example.invalid",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            Role(
+                scope_type="organization",
+                scope_id=org_id,
+                principal_type="user",
+                principal_id=user_id,
+                role="member",
+                status="active",
+            )
+        )
 
 
 async def test_create_issue_writes_activity(session: AsyncSession) -> None:
@@ -120,6 +153,7 @@ async def test_child_issue_inherits_parent_project_and_workspace(
     session: AsyncSession,
 ) -> None:
     org = await _seed_org(session)
+    await _seed_agent(session, org.id, "agent-1")
     service = IssueService(session)
 
     async with async_transaction(session):
@@ -172,6 +206,7 @@ async def test_child_issue_does_not_reuse_parent_isolated_execution_workspace(
     session: AsyncSession,
 ) -> None:
     org = await _seed_org(session)
+    await _seed_agent(session, org.id, "agent-1")
     service = IssueService(session)
 
     async with async_transaction(session):
@@ -224,6 +259,7 @@ async def test_agent_cannot_delegate_child_issue_to_self(
     session: AsyncSession,
 ) -> None:
     org = await _seed_org(session)
+    await _seed_agent(session, org.id, "agent-parent")
     service = IssueService(session)
 
     async with async_transaction(session):
@@ -373,6 +409,7 @@ async def test_empty_update_does_not_write_activity(session: AsyncSession) -> No
 
 async def test_review_approve_moves_issue_to_done(session: AsyncSession) -> None:
     org = await _seed_org(session)
+    await _seed_reviewer(session, org.id, "reviewer-1")
     service = IssueService(session)
 
     async with async_transaction(session):
@@ -415,6 +452,7 @@ async def test_review_request_changes_moves_issue_back_to_in_progress(
     session: AsyncSession,
 ) -> None:
     org = await _seed_org(session)
+    await _seed_reviewer(session, org.id, "reviewer-2")
     service = IssueService(session)
 
     async with async_transaction(session):
@@ -446,6 +484,7 @@ async def test_review_needs_followup_keeps_status_and_writes_intervention_activi
     session: AsyncSession,
 ) -> None:
     org = await _seed_org(session)
+    await _seed_reviewer(session, org.id, "reviewer-3")
     service = IssueService(session)
 
     async with async_transaction(session):

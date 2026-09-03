@@ -4,6 +4,7 @@ from typing import Any
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.shared.api_paths.projects import (
     ORG_PROJECT_LIST_PATH,
@@ -30,10 +31,13 @@ from packages.shared.validators.project import (
 )
 
 from ..dependencies.access import (
+    assert_organization_permission,
     assert_organization_access,
     require_actor_identity,
     require_organization_access,
 )
+from ..dependencies.database import get_session
+from ..dependencies.identity import require_organization_permission
 from ..dependencies.projects import get_project_service
 from ..dependencies.workspaces import get_workspace_service
 from ..services.projects import ProjectService
@@ -87,7 +91,7 @@ async def create_project_route(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("projects:manage")),
     service: ProjectService = Depends(get_project_service),
 ) -> ProjectDetail:
     try:
@@ -124,9 +128,13 @@ async def update_project_route(
     body: dict[str, Any] = Body(...),
     orgId: str | None = Query(default=None),
     service: ProjectService = Depends(get_project_service),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectDetail:
     detail = await _get_project_or_404(
         id, request=request, service=service, org_id=orgId
+    )
+    await assert_organization_permission(
+        request, session, detail["orgId"], "projects:manage"
     )
     try:
         payload = validate_update_project(body)
@@ -151,9 +159,13 @@ async def delete_project_route(
     request: Request,
     orgId: str | None = Query(default=None),
     service: ProjectService = Depends(get_project_service),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectDetail:
     detail = await _get_project_or_404(
         id, request=request, service=service, org_id=orgId
+    )
+    await assert_organization_permission(
+        request, session, detail["orgId"], "projects:manage"
     )
     actor = require_actor_identity(request)
     removed = await service.delete_project(
@@ -200,9 +212,13 @@ async def create_project_workspace_route(
     body: dict[str, Any] = Body(...),
     orgId: str | None = Query(default=None),
     service: ProjectService = Depends(get_project_service),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectWorkspace:
     detail = await _get_project_or_404(
         id, request=request, service=service, org_id=orgId
+    )
+    await assert_organization_permission(
+        request, session, detail["orgId"], "workspaces:manage"
     )
     try:
         payload = validate_create_project_workspace(body)
@@ -229,9 +245,13 @@ async def update_project_workspace_route(
     body: dict[str, Any] = Body(...),
     orgId: str | None = Query(default=None),
     service: ProjectService = Depends(get_project_service),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectWorkspace:
     detail = await _get_project_or_404(
         id, request=request, service=service, org_id=orgId
+    )
+    await assert_organization_permission(
+        request, session, detail["orgId"], "workspaces:manage"
     )
     try:
         payload = validate_update_project_workspace(body)
@@ -262,9 +282,13 @@ async def delete_project_workspace_route(
     request: Request,
     orgId: str | None = Query(default=None),
     service: ProjectService = Depends(get_project_service),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectWorkspace:
     detail = await _get_project_or_404(
         id, request=request, service=service, org_id=orgId
+    )
+    await assert_organization_permission(
+        request, session, detail["orgId"], "workspaces:manage"
     )
     actor = require_actor_identity(request)
     try:
@@ -306,9 +330,13 @@ async def add_project_resource_route(
     body: dict[str, Any] = Body(...),
     orgId: str | None = Query(default=None),
     service: ProjectService = Depends(get_project_service),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectResourceAttachment:
     detail = await _get_project_or_404(
         id, request=request, service=service, org_id=orgId
+    )
+    await assert_organization_permission(
+        request, session, detail["orgId"], "projects:manage"
     )
     try:
         payload = validate_project_resource_attachment_input(body)
@@ -335,9 +363,13 @@ async def update_project_resource_route(
     body: dict[str, Any] = Body(...),
     orgId: str | None = Query(default=None),
     service: ProjectService = Depends(get_project_service),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectResourceAttachment:
     detail = await _get_project_or_404(
         id, request=request, service=service, org_id=orgId
+    )
+    await assert_organization_permission(
+        request, session, detail["orgId"], "projects:manage"
     )
     try:
         payload = validate_update_project_resource_attachment(body)
@@ -368,9 +400,13 @@ async def delete_project_resource_route(
     request: Request,
     orgId: str | None = Query(default=None),
     service: ProjectService = Depends(get_project_service),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectResourceAttachment:
     detail = await _get_project_or_404(
         id, request=request, service=service, org_id=orgId
+    )
+    await assert_organization_permission(
+        request, session, detail["orgId"], "projects:manage"
     )
     actor = require_actor_identity(request)
     attachment = await service.remove_resource_attachment(

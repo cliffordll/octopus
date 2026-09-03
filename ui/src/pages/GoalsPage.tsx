@@ -6,9 +6,12 @@ import { goalsApi } from "../api/goals";
 import type { GoalLevel, GoalStatus } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { GoalTree } from "../components/GoalTree";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
+import { statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
 const LEVELS: GoalLevel[] = ["organization", "team", "agent", "task"];
+const LEVEL_LABELS: Record<GoalLevel, string> = { organization: "组织", team: "团队", agent: "智能体", task: "任务" };
 const STATUSES: GoalStatus[] = ["planned", "active", "achieved", "cancelled"];
 
 export function GoalsPage() {
@@ -56,20 +59,14 @@ export function GoalsPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="org-resource-hero org-goals-hero">
-        <div className="org-resource-hero-copy">
-          <div className="org-resource-title-block">
-            <p className="eyebrow">Goals</p>
-            <h1>目标</h1>
-          </div>
-          <p>维护组织、团队、智能体和任务层级的目标，并跟踪它们之间的父子关系。</p>
-        </div>
-        <div className="org-hero-actions org-page-actions">
-          <button className="org-primary-action" type="button" onClick={() => setDialogOpen(true)}>New Goal</button>
-        </div>
-      </header>
+      <TertiaryPageHeader
+        actions={<button className="org-primary-action" type="button" onClick={() => setDialogOpen(true)}>创建目标</button>}
+        eyebrow="Goals"
+        supporting="维护组织、团队、智能体和任务层级的目标，并跟踪它们之间的父子关系。"
+        title="目标"
+      />
       <section className="panel org-goal-list-card">
-        <div className="org-goal-list-heading">
+        <div className="org-section-header">
           <div>
             <p className="eyebrow">Goal Tree</p>
             <h2>目标列表</h2>
@@ -91,42 +88,42 @@ export function GoalsPage() {
           <section aria-labelledby="create-goal-title" aria-modal="true" className="panel task-modal task-create-modal" role="dialog">
             <div className="task-modal-header">
               <div>
-                <h2 id="create-goal-title">New Goal</h2>
-                <p className="muted">Create a goal with status, level, parent, and owner.</p>
+                <h2 id="create-goal-title">创建目标</h2>
+                <p className="muted">设置目标的状态、层级、上级目标和负责人。</p>
               </div>
               <button aria-label="关闭" className="secondary" onClick={() => setDialogOpen(false)} type="button">关闭</button>
             </div>
             <form className="form task-create-form" onSubmit={submit}>
               <div className="task-form-row">
-                <label className="form-field-full">Goal title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
+                <label className="form-field-full">目标名称<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
               </div>
               <div className="task-form-row">
-                <label className="form-field-full">Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+                <label className="form-field-full">描述<textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
               </div>
               <div className="task-form-row task-form-grid">
                 <label>
-                  Level
+                  层级
                   <select value={level} onChange={(event) => setLevel(event.target.value as GoalLevel)}>
-                    {LEVELS.map((item) => <option key={item}>{item}</option>)}
+                    {LEVELS.map((item) => <option key={item} value={item}>{LEVEL_LABELS[item]}</option>)}
                   </select>
                 </label>
                 <label>
-                  Status
+                  状态
                   <select value={status} onChange={(event) => setStatus(event.target.value as GoalStatus)}>
-                    {STATUSES.map((item) => <option key={item}>{item}</option>)}
+                    {STATUSES.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
                   </select>
                 </label>
               </div>
               <div className="task-form-row task-form-grid">
                 <label>
-                  Parent goal
+                  上级目标
                   <select value={parentId} onChange={(event) => setParentId(event.target.value)}>
                     <option value="">无</option>
                     {goalList.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}
                   </select>
                 </label>
                 <label>
-                  Owner
+                  负责人
                   <select value={ownerAgentId} onChange={(event) => setOwnerAgentId(event.target.value)}>
                     <option value="">未设置</option>
                     {agentList.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
@@ -136,8 +133,8 @@ export function GoalsPage() {
               {agents.error && <ErrorNotice error={agents.error} />}
               {create.error && <ErrorNotice error={create.error} />}
               <div className="task-modal-actions">
-                <button className="secondary" onClick={() => setDialogOpen(false)} type="button">Cancel</button>
-                <button disabled={create.isPending} type="submit">Create goal</button>
+                <button className="secondary" onClick={() => setDialogOpen(false)} type="button">取消</button>
+                <button disabled={create.isPending} type="submit">创建</button>
               </div>
             </form>
           </section>

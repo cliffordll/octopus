@@ -166,7 +166,7 @@ async def test_agent_budget_patch_rejects_cross_org_agent_actor(
     )
 
     assert code == 403
-    assert "another organization" in body["detail"]
+    assert body["detail"] == "Missing organization permission: costs:manage"
     async with factory() as session:
         foreign_agent = await session.get(Agent, foreign_agent_id)
     assert foreign_agent is not None

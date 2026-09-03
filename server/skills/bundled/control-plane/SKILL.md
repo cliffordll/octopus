@@ -265,10 +265,10 @@ Child outputs are final by default, but the parent Agent is always resumed after
 
 Never test this write command by creating a placeholder child on the real parent issue.
 
-Before delegating child issues, list available agents when you need to choose the executor:
+Before delegating child issues, list available Human and Agent members when you need to choose the executor:
 
 ```bash
-octopus agent list --org-id "$OCTOPUS_ORG_ID" --json
+octopus organization hierarchy --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Before creating child issues, list existing children for the parent. A retry in
@@ -279,11 +279,17 @@ another split; a later parent Run may create a new delegation batch:
 octopus issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --json
 ```
 
-Every child in the JSON file must include `assigneeAgentId`; never assign a
-delegated child issue to yourself. If you will do that work inside the parent
-run, do not create a child issue for it. Do not create a summary/merge/report
-child: after all real parallel children settle, the parent run resumes and owns
-the final synthesis and deliverable.
+Every child in the JSON file must include exactly one of `assigneeAgentId` or
+`assigneeUserId`. Use `assigneeAgentId` for automated execution and
+`assigneeUserId` when a Human must perform or confirm the work. Human work is
+tracked manually and does not create a Run. Never assign a delegated child issue
+to yourself. You may delegate only to active members who report directly to you
+in the organization hierarchy. If the needed executor is your peer or belongs
+to another manager, ask that manager to assign the work instead of creating the
+child yourself. If you will do that work inside the parent run, do not create a
+child issue for it. Do not create a summary/merge/report child: after all real
+parallel children settle, the parent run resumes and owns the final synthesis
+and deliverable.
 
 After creating delegated child issues, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent after the children settle. The parent issue must wait for those child issues to run and report back before summarizing their results. Do not poll for children inside the current runtime process. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
 

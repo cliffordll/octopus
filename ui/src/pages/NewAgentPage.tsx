@@ -8,6 +8,7 @@ import type { AgentRole, AgentRuntimeType, RuntimeModel } from "../api/types";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { roleLabel } from "../utils/display";
 import { applyRuntimeModelConfig, listRuntimeModelOptions, runtimeConfigAfterSwitch, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
 
@@ -33,13 +34,6 @@ function mergeModelConfig(config: Record<string, unknown>, runtime: AgentRuntime
   return applyRuntimeModelConfig(config, runtime, trimmed);
 }
 
-function parseCsv(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; orgId: string }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState<AgentRole>("engineer");
@@ -51,7 +45,6 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   const [runtimeModel, setRuntimeModel] = useState("");
   const [metadata, setMetadata] = useState("{}");
   const [configurationError, setConfigurationError] = useState("");
-  const [desiredSkills, setDesiredSkills] = useState("");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const organization = useQuery({ queryKey: ["organization", orgId], queryFn: () => organizationsApi.get(orgId) });
@@ -89,14 +82,14 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
       agentsApi.hire(orgId, {
         ...(name.trim() ? { name: name.trim() } : {}),
         role: effectiveRole,
+        ...(ceoActorId ? { reportsTo: ceoActorId } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(capabilities.trim() ? { capabilities: capabilities.trim() } : {}),
         agentRuntimeType: runtime,
         agentRuntimeConfig: mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, runtimeModel),
         ...(budgetMonthlyDollars.trim() ? { budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars) * 100) } : {}),
         ...(metadata.trim() && metadata.trim() !== "{}" ? { metadata: readJsonObject(metadata, "Metadata") } : {}),
-        ...(desiredSkills.trim() ? { desiredSkills: parseCsv(desiredSkills) } : {}),
-      }, ceoActorId),
+      }),
     onSuccess: (agent) => {
       void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
@@ -205,16 +198,12 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
           月度预算（美元）
           <input min="0" step="0.01" type="number" value={budgetMonthlyDollars} onChange={(event) => setBudgetMonthlyDollars(event.target.value)} />
         </label>
-        <label>
-          期望技能
-          <input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} />
-        </label>
         <RuntimeConfigFields
           advancedEditor={(
             <details className="runtime-config-advanced">
-              <summary>高级 JSON</summary>
+              <summary>运行时 JSON</summary>
               <label>
-                Agent runtime config
+                <span className="sr-only">运行时 JSON</span>
                 <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
               </label>
             </details>
@@ -269,12 +258,10 @@ export function NewAgentPage() {
   const { orgId = "" } = useParams();
   return (
     <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
-        <div>
-          <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
-          <h1>新建智能体</h1>
-        </div>
-      </header>
+      <TertiaryPageHeader
+        eyebrow={<><Link to={`/orgs/${orgId}/agents`}>Agents</Link><span> / New agent</span></>}
+        title="新建智能体"
+      />
       <AgentCreateForm orgId={orgId} />
     </AgentsWorkspace>
   );

@@ -25,6 +25,24 @@ def test_organization_list_json_output() -> None:
     assert '"name": "Core"' in output.getvalue()
 
 
+def test_organization_hierarchy_lists_human_and_agent_members() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200, json=[{"principalType": "user", "displayName": "Human"}]
+        )
+
+    result = main(
+        ["organization", "hierarchy", "--org-id", "org-1"],
+        client=ApiClient(transport=httpx.MockTransport(handler)),
+    )
+
+    assert result == 0
+    assert requests[0].url.path == "/api/orgs/org-1/hierarchy"
+
+
 def test_api_base_defaults_to_octopus_api_url(monkeypatch) -> None:
     monkeypatch.setenv("OCTOPUS_API_URL", "http://octopus.test")
     args = build_parser().parse_args(["organization", "list"])

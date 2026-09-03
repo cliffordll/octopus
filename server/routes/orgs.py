@@ -44,8 +44,11 @@ from packages.shared.validators.resources import (
 )
 
 from ..dependencies.access import (
+    ActorOrganizationScope,
     require_actor_identity,
-    require_board_access,
+    require_actor_organization_scope,
+    require_root_access,
+    require_human_access,
     require_organization_access,
 )
 from ..dependencies.orgs import (
@@ -53,6 +56,7 @@ from ..dependencies.orgs import (
     get_org_service,
     get_organization_import_service,
 )
+from ..dependencies.identity import require_organization_permission
 from ..dependencies.organization_workspace_browser import (
     get_organization_workspace_browser_service,
 )
@@ -71,17 +75,20 @@ router = APIRouter(tags=["orgs"])
 
 @router.get(ORG_LIST_PATH)
 async def list_orgs(
-    _: None = Depends(require_board_access),
+    scope: ActorOrganizationScope = Depends(require_actor_organization_scope),
     service: OrgService = Depends(get_org_service),
 ) -> list[OrganizationSummary]:
-    return await service.list()
+    return await service.list(
+        organization_ids=scope.organization_ids,
+        can_access_all=scope.can_access_all,
+    )
 
 
 @router.post(ORG_LIST_PATH)
 async def create_org(
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: None = Depends(require_human_access),
     service: OrgService = Depends(get_org_service),
 ) -> OrganizationDetail:
     try:
@@ -110,7 +117,7 @@ async def import_org(
     model: str | None = Form(default=None),
     collision: str = Form(default="rename", alias="collisionStrategy"),
     dry_run: bool = Form(default=False, alias="dryRun"),
-    _: None = Depends(require_board_access),
+    _: None = Depends(require_root_access),
     service: OrganizationImportService = Depends(get_organization_import_service),
 ) -> dict[str, Any]:
     """Import a companies.sh / Octopus organization package from an uploaded zip.
@@ -164,7 +171,7 @@ async def create_org_resource(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("organizations:manage")),
     service: ResourceService = Depends(get_resource_service),
 ) -> OrganizationResource:
     try:
@@ -190,7 +197,7 @@ async def update_org_resource(
     orgId: str,
     resourceId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("organizations:manage")),
     service: ResourceService = Depends(get_resource_service),
 ) -> OrganizationResource:
     try:
@@ -221,7 +228,7 @@ async def update_org_resource(
 async def archive_org(
     request: Request,
     orgId: str,
-    _: None = Depends(require_board_access),
+    _: object = Depends(require_organization_permission("organizations:manage")),
     service: OrgService = Depends(get_org_service),
 ) -> OrganizationDetail:
     actor = require_actor_identity(request)
@@ -243,7 +250,7 @@ async def delete_org_resource(
     request: Request,
     orgId: str,
     resourceId: str,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("organizations:manage")),
     service: ResourceService = Depends(get_resource_service),
 ) -> OrganizationResource:
     actor = require_actor_identity(request)
@@ -355,7 +362,7 @@ async def read_org_workspace_archive(
 
 @router.get(ORG_DETAIL_PATH)
 async def get_org(
-    _: None = Depends(require_board_access),
+    _: None = Depends(require_organization_access),
     org: OrganizationDetail = Depends(get_org_detail),
 ) -> OrganizationDetail:
     return org
@@ -366,7 +373,7 @@ async def update_org(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: object = Depends(require_organization_permission("organizations:manage")),
     org: OrganizationDetail = Depends(get_org_detail),
     service: OrgService = Depends(get_org_service),
 ) -> OrganizationDetail:

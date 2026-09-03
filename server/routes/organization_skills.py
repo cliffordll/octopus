@@ -29,6 +29,7 @@ from packages.shared.validators.organization_skills import (
 )
 
 from ..dependencies.access import require_actor_identity, require_organization_access
+from ..dependencies.identity import require_organization_permission
 from ..dependencies.organization_skills import get_organization_skill_service
 from ..services.organization_skills import (
     OrganizationSkillConflictError,
@@ -53,7 +54,7 @@ async def create_organization_skill(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("skills:manage")),
     service: OrganizationSkillService = Depends(get_organization_skill_service),
 ) -> OrganizationSkill:
     try:
@@ -88,7 +89,7 @@ async def import_organization_skill(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("skills:manage")),
     service: OrganizationSkillService = Depends(get_organization_skill_service),
 ) -> OrganizationSkill:
     try:
@@ -116,7 +117,7 @@ async def scan_local_organization_skills(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("skills:manage")),
     service: OrganizationSkillService = Depends(get_organization_skill_service),
 ) -> OrganizationSkillScanLocalResult:
     try:
@@ -156,7 +157,7 @@ async def install_organization_skill_update(
     request: Request,
     orgId: str,
     skillId: str,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("skills:manage")),
     service: OrganizationSkillService = Depends(get_organization_skill_service),
 ) -> OrganizationSkill:
     try:
@@ -225,7 +226,7 @@ async def update_organization_skill_file(
     orgId: str,
     skillId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("skills:manage")),
     service: OrganizationSkillService = Depends(get_organization_skill_service),
 ) -> OrganizationSkillFileDetail:
     try:
@@ -257,7 +258,7 @@ async def delete_organization_skill(
     request: Request,
     orgId: str,
     skillId: str,
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("skills:manage")),
     service: OrganizationSkillService = Depends(get_organization_skill_service),
 ) -> OrganizationSkill:
     actor = require_actor_identity(request)

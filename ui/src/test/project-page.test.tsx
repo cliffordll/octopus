@@ -1,11 +1,36 @@
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
+import type { IssueListItem, IssueWorkProduct } from "../api/types";
+import { ProjectWorkspaceExplorer } from "../components/ProjectWorkspaceExplorer";
 import { renderApp, respond } from "./render-app";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it("hides the parent task column when the workspace has no parent tasks", () => {
+  const issue: IssueListItem = {
+    id: "issue-1", orgId: "org-1", identifier: "OCT-1", title: "独立任务", status: "done", priority: "medium",
+    projectId: "project-1", goalId: null, parentId: null, assigneeAgentId: null, assigneeUserId: null,
+    createdByAgentId: null, createdByUserId: null, originKind: "manual", originId: null, updatedAt: "2026-05-28T11:00:00Z",
+  };
+  const product = { issueId: issue.id } as IssueWorkProduct;
+  render(
+    <MemoryRouter>
+      <ProjectWorkspaceExplorer
+        agents={[]}
+        issues={new Map([[issue.id, issue]])}
+        nodes={[{ name: "README.md", path: "README.md", type: "file", size: 128, modifiedAt: "2026-05-28T11:00:00Z" }]}
+        orgId="org-1"
+        productsByPath={new Map([["README.md", [product]]])}
+      />
+    </MemoryRouter>,
+  );
+
+  expect(screen.queryByRole("button", { name: "按父任务排序" })).not.toBeInTheDocument();
 });
 
 it("updates a project and manages its resource attachments", async () => {
@@ -151,6 +176,7 @@ it("updates a project and manages its resource attachments", async () => {
           status: "blocked",
           priority: "medium",
           projectId: "project-1",
+          parentId: "issue-1",
           assigneeAgentId: null,
           assigneeUserId: null,
           createdAt: "2026-05-28T12:00:00Z",
@@ -176,9 +202,17 @@ it("updates a project and manages its resource attachments", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   const { container } = renderApp("/orgs/org-1/projects/project-1");
-  expect(await screen.findByRole("heading", { name: "控制台" })).toBeInTheDocument();
+  const projectHeading = await screen.findByRole("heading", { name: "控制台" });
+  const projectHeader = projectHeading.closest("header");
+  expect(projectHeader).not.toBeNull();
+  expect(within(projectHeader!).getByText("Project")).toHaveClass("eyebrow");
+  expect(within(projectHeader!).getByText("console")).toBeInTheDocument();
+  expect(within(projectHeader!).getByText("原描述")).toBeInTheDocument();
+  expect(projectHeader!.querySelector(".project-avatar-lg")).toBeNull();
   expect(container.querySelector(".project-summary-grid")).toBeNull();
   const tabs = screen.getByRole("navigation", { name: "项目详情导航" });
+  expect(within(tabs).getByRole("link", { name: "配置" })).toHaveClass("active");
+  expect(within(tabs).getByRole("link", { name: "配置" })).toHaveAttribute("aria-current", "page");
   expect(within(tabs).getByRole("link", { name: "配置" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects/project-1/configuration",
@@ -199,7 +233,17 @@ it("updates a project and manages its resource attachments", async () => {
     "href",
     "/orgs/org-1/projects/project-1/budget",
   );
-  expect(screen.getByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
+  await userEvent.click(within(tabs).getByRole("link", { name: "预算" }));
+  const budgetPanel = screen.getByRole("region", { name: "项目预算" });
+  expect(within(budgetPanel).getByText("预算治理状态")).toBeInTheDocument();
+  expect(within(budgetPanel).getByText("预算限制未触发")).toBeInTheDocument();
+  expect(within(budgetPanel).queryByRole("heading", { name: "预算" })).not.toBeInTheDocument();
+  expect(within(budgetPanel).queryByText("暂停原因")).not.toBeInTheDocument();
+  await userEvent.click(within(tabs).getByRole("link", { name: "配置" }));
+  expect(screen.getByRole("heading", { name: "工作区设置" })).toBeInTheDocument();
+  const workspaceNameRow = screen.getByText("默认代码来源").closest(".project-workspace-name-row");
+  expect(workspaceNameRow).not.toBeNull();
+  expect(within(workspaceNameRow as HTMLElement).getByTitle("D:/coding/octopus")).toHaveClass("project-workspace-path-inline");
   expect(screen.getByTitle("https://example.com/octopus.git · main")).toBeInTheDocument();
   expect(screen.getAllByText("console-main").length).toBeGreaterThanOrEqual(1);
 
@@ -208,6 +252,7 @@ it("updates a project and manages its resource attachments", async () => {
   await userEvent.selectOptions(screen.getByLabelText("负责人"), "agent-1");
   await userEvent.clear(screen.getByLabelText("目标日期"));
   await userEvent.type(screen.getByLabelText("目标日期"), "2026-06-01");
+  await userEvent.click(screen.getByText("系统信息与关联目标"));
   await userEvent.type(
     screen.getByLabelText("目标 ID"),
     "11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222",
@@ -227,7 +272,8 @@ it("updates a project and manages its resource attachments", async () => {
       }),
     }),
   );
-  await userEvent.click(screen.getByRole("button", { name: "保存基础信息" }));
+  expect(screen.getByRole("button", { name: "保存设置" })).toHaveClass("project-config-action");
+  await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
     expect.objectContaining({
@@ -245,6 +291,9 @@ it("updates a project and manages its resource attachments", async () => {
 
   await userEvent.click(within(tabs).getByRole("link", { name: "资源" }));
   expect(await screen.findByText("Repository")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "资源" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "已附加资源" })).not.toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "资源摘要" })).toHaveTextContent("1 已附加");
   await userEvent.selectOptions(screen.getByLabelText("项目角色"), "reference");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1/resources/attachment-1",
@@ -291,22 +340,40 @@ it("updates a project and manages its resource attachments", async () => {
   );
 
   await userEvent.click(within(screen.getByRole("navigation", { name: "项目详情导航" })).getByRole("link", { name: "任务" }));
+  const issuePanel = screen.getByRole("region", { name: "项目任务" });
+  expect(issuePanel).toHaveClass("project-issues");
+  expect(issuePanel).not.toHaveClass("panel");
+  expect(within(issuePanel).queryByText("PROJECT ISSUES")).not.toBeInTheDocument();
+  expect(within(issuePanel).queryByRole("heading", { name: "任务" })).not.toBeInTheDocument();
+  expect(within(issuePanel).queryByText("按状态展示当前项目关联的任务。")).not.toBeInTheDocument();
   expect(await screen.findByRole("link", { name: "完成控制台导航" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-1",
   );
   const projectIssueCard = screen.getByRole("link", { name: "完成控制台导航" }).closest(".project-issue-status-row");
   expect(projectIssueCard).not.toBeNull();
-  expect(projectIssueCard).toHaveTextContent("创建时间");
-  expect(projectIssueCard).toHaveTextContent("2026年5月28日 18:00");
-  expect(projectIssueCard).toHaveTextContent("归属");
+  expect(projectIssueCard?.closest(".project-issue-grouped-list")).not.toBeNull();
+  expect(projectIssueCard).not.toHaveTextContent("创建时间");
+  expect(projectIssueCard).not.toHaveTextContent("归属");
+  expect(projectIssueCard).not.toHaveTextContent("阶段：");
+  expect(projectIssueCard).not.toHaveTextContent("查看详情 / 执行输出");
   expect(projectIssueCard).toHaveTextContent("Builder");
+  expect(projectIssueCard).toHaveTextContent("高");
+  expect(projectIssueCard).toHaveTextContent("2026年5月28日 19:00");
+  expect(within(issuePanel).getAllByText("任务编号 标题")).toHaveLength(1);
+  expect(within(issuePanel).getAllByText("父任务")).toHaveLength(1);
+  expect(within(issuePanel).getAllByText("执行者")).toHaveLength(1);
+  expect(within(issuePanel).getAllByText("更新时间")).toHaveLength(1);
+  expect(within(screen.getByRole("link", { name: "等待接口确认" })).getByTitle("父任务：OCT-1 完成控制台导航")).toBeInTheDocument();
+  expect(within(issuePanel).getAllByRole("heading", { level: 3 })).toHaveLength(3);
   const issueSummary = screen.getByText("总数").closest(".project-issue-status-summary");
   expect(issueSummary).not.toBeNull();
-  expect(within(issueSummary as HTMLElement).getByText("总数").closest(".summary-metric")).toHaveTextContent("3");
-  expect(within(issueSummary as HTMLElement).getByText("活跃").closest(".summary-metric")).toHaveTextContent("2");
-  expect(within(issueSummary as HTMLElement).getByText("阻塞").closest(".summary-metric")).toHaveTextContent("1");
-  expect(within(issueSummary as HTMLElement).getByText("已完成").closest(".summary-metric")).toHaveTextContent("1");
+  expect(issueSummary).toHaveClass("project-summary-toolbar");
+  expect(within(issueSummary as HTMLElement).getByRole("group", { name: "任务摘要" })).toHaveClass("project-compact-summary");
+  expect(within(issueSummary as HTMLElement).getByText("总数").closest(".project-summary-chip")).toHaveTextContent("3");
+  expect(within(issueSummary as HTMLElement).getByText("活跃").closest(".project-summary-chip")).toHaveTextContent("2");
+  expect(within(issueSummary as HTMLElement).getByText("阻塞").closest(".project-summary-chip")).toHaveTextContent("1");
+  expect(within(issueSummary as HTMLElement).getByText("已完成").closest(".project-summary-chip")).toHaveTextContent("1");
   expect(screen.getByRole("heading", { name: "进行中" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "已完成" })).toBeInTheDocument();
@@ -324,7 +391,7 @@ it("updates a project and manages its resource attachments", async () => {
     expect.objectContaining({ method: "DELETE" }),
   );
 }, 10_000);
-it("shows project workspace artifacts as a directory tree", async () => {
+it("shows the project main workspace instead of derived task workspaces", async () => {
   const project = {
     id: "project-1",
     orgId: "org-1",
@@ -348,7 +415,7 @@ it("shows project workspace artifacts as a directory tree", async () => {
       cwd: "D:/coding/octopus",
       displayName: "默认代码来源",
       managedFolder: "organizations/org-1/workspaces/artifacts",
-      executionWorkspacePolicy: { mode: "shared_workspace" },
+      executionWorkspacePolicy: { mode: "operator_branch" },
     },
     workspaces: [
       {
@@ -363,7 +430,7 @@ it("shows project workspace artifacts as a directory tree", async () => {
         isPrimary: true,
         status: "active",
         metadata: null,
-        executionWorkspacePolicy: { mode: "shared_workspace" },
+        executionWorkspacePolicy: { defaultMode: "operator_branch" },
         createdAt: "2026-05-28T10:00:00Z",
         updatedAt: "2026-05-28T10:00:00Z",
       },
@@ -373,16 +440,16 @@ it("shows project workspace artifacts as a directory tree", async () => {
     createdAt: "2026-05-28T10:00:00Z",
     updatedAt: "2026-05-28T10:00:00Z",
   };
-  const executionWorkspace = {
+  const derivedTaskWorkspace = {
     id: "exec-1",
     orgId: "org-1",
     projectId: "project-1",
     projectWorkspaceId: "workspace-1",
     sourceIssueId: "issue-1",
-    mode: "shared_workspace",
-    strategyType: "shared_workspace",
-    name: "共享运行",
-    cwd: "D:/coding/octopus",
+    mode: "operator_branch",
+    strategyType: "git_worktree",
+    name: "当前独立运行",
+    cwd: "D:/coding/octopus/.octopus/worktrees/oct-1",
     status: "active",
     branchName: null,
     baseBranchName: null,
@@ -391,12 +458,20 @@ it("shows project workspace artifacts as a directory tree", async () => {
     createdAt: "2026-05-28T10:00:00Z",
     updatedAt: "2026-05-28T11:00:00Z",
   };
+  const executionWorkspace = {
+    ...derivedTaskWorkspace,
+    id: "exec-shared",
+    mode: "shared_workspace",
+    strategyType: "shared_workspace",
+    name: "项目主工作区",
+    cwd: "D:/coding/octopus",
+  };
   const workProduct = {
     id: "wp-1",
     orgId: "org-1",
     projectId: "project-1",
     issueId: "issue-1",
-    executionWorkspaceId: "exec-1",
+    executionWorkspaceId: "exec-shared",
     runtimeServiceId: null,
     type: "report",
     provider: "octopus",
@@ -431,14 +506,20 @@ it("shows project workspace artifacts as a directory tree", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([project]);
-    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([{
+      id: "agent-1", orgId: "org-1", name: "engineer-1", urlKey: "engineer-1", role: "engineer", title: null,
+      status: "active", agentRuntimeType: "codex_local", agentRuntimeConfig: {}, budgetMonthlyCents: 0, lastHeartbeatAt: null,
+    }]);
     if (path === "/api/orgs/org-1/issues?projectId=project-1" && init?.method === "GET") {
-      return respond([{ id: "issue-1", orgId: "org-1", identifier: "OCT-1", title: "完成控制台导航", status: "done", priority: "high", projectId: "project-1", assigneeAgentId: null, assigneeUserId: null, createdAt: "2026-05-28T10:00:00Z", updatedAt: "2026-05-28T11:00:00Z" }]);
+      return respond([
+        { id: "issue-parent", orgId: "org-1", identifier: "OCT-0", title: "控制台改版", status: "in_progress", priority: "high", projectId: "project-1", parentId: null, assigneeAgentId: null, assigneeUserId: null, createdAt: "2026-05-28T09:00:00Z", updatedAt: "2026-05-28T10:00:00Z" },
+        { id: "issue-1", orgId: "org-1", identifier: "OCT-1", title: "完成控制台导航", status: "done", priority: "high", projectId: "project-1", parentId: "issue-parent", assigneeAgentId: "agent-1", assigneeUserId: null, createdAt: "2026-05-28T10:00:00Z", updatedAt: "2026-05-28T11:00:00Z" },
+      ]);
     }
-    if (path === "/api/execution-workspaces?orgId=org-1&projectId=project-1" && init?.method === "GET") return respond([executionWorkspace]);
-    if (path === "/api/execution-workspaces/exec-1/files" && init?.method === "GET") {
+    if (path === "/api/execution-workspaces?orgId=org-1&projectId=project-1" && init?.method === "GET") return respond([derivedTaskWorkspace, executionWorkspace]);
+    if (path === "/api/execution-workspaces/exec-shared/files" && init?.method === "GET") {
       return respond({
-        workspaceId: "exec-1",
+        workspaceId: "exec-shared",
         root: "D:/coding/octopus",
         available: true,
         error: null,
@@ -464,17 +545,54 @@ it("shows project workspace artifacts as a directory tree", async () => {
   renderApp("/orgs/org-1/projects/project-1/workspace");
 
   const panel = await screen.findByRole("region", { name: "工作区产物" });
-  expect(within(panel).getByText("共享运行")).toBeInTheDocument();
-  const fileTree = await within(panel).findByRole("region", { name: "共享运行 文件树" });
+  expect(panel.closest(".org-content")).toHaveClass("project-workspace-content");
+  expect(within(panel).queryByRole("heading", { name: "工作区" })).not.toBeInTheDocument();
+  expect(within(panel).queryByText("WORKSPACE OUTPUTS")).not.toBeInTheDocument();
+  expect(within(panel).queryByText("按执行工作区查看项目目录与任务产物。")).not.toBeInTheDocument();
+  expect(within(panel).queryByText("代码来源")).not.toBeInTheDocument();
+  expect(within(panel).getByText("项目主工作区")).toBeInTheDocument();
+  expect(within(panel).queryByText("当前独立运行")).not.toBeInTheDocument();
+  expect(within(panel).queryByText("暂无任务产物。任务完成并登记产物后会出现在这里。")).not.toBeInTheDocument();
+  const fileTree = await within(panel).findByRole("region", { name: "项目主工作区 文件树" });
+  const workspaceHeader = within(panel).getByText("项目主工作区").closest<HTMLElement>(".project-artifact-workspace-heading")!;
+  expect(workspaceHeader.nextElementSibling).toBe(fileTree);
+  expect(fileTree).not.toContainElement(workspaceHeader);
+  expect(within(workspaceHeader).getByText("shared_workspace")).toBeInTheDocument();
+  expect(fileTree.closest(".project-workspace-artifacts-body")).not.toBeNull();
+  expect(within(fileTree).queryByRole("tab", { name: "任务产物" })).not.toBeInTheDocument();
+  expect(within(fileTree).queryByRole("tab", { name: "全部文件" })).not.toBeInTheDocument();
+  expect(within(fileTree).getByRole("button", { name: "按文件名排序" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(fileTree).getByRole("button", { name: "按更新时间排序" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("button", { name: "按任务编号 标题排序" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("button", { name: "按执行者排序" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("button", { name: "按父任务排序" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("separator", { name: "调整信息栏宽度" })).toHaveAttribute("aria-valuenow", "720");
   expect(within(fileTree).getByText("api")).toBeInTheDocument();
-  expect(within(fileTree).getByText("server.py")).toBeInTheDocument();
-  expect(within(fileTree).getByText("README.md")).toBeInTheDocument();
+  expect(within(fileTree).getByRole("treeitem", { name: "server.py" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("treeitem", { name: "README.md" })).toBeInTheDocument();
   expect(within(fileTree).getByText("app")).toBeInTheDocument();
   expect(within(fileTree).getByText("routes")).toBeInTheDocument();
-  expect(within(fileTree).getByText("hello.py")).toBeInTheDocument();
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("OCT-1");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("完成控制台导航");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("OCT-1完成控制台导航");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("engineer-1");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("OCT-0");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("控制台改版");
+  await userEvent.click(within(fileTree).getByRole("button", { name: "按任务编号 标题排序" }));
+  expect(within(fileTree).getByRole("button", { name: "按任务编号 标题排序" })).toHaveAttribute("aria-pressed", "true");
+  expect(fileTree.querySelector(".file-context-browser")).toHaveClass("project-workspace-explorer");
+  expect(fileTree.querySelector(".file-browser")).toBeNull();
+  expect(within(fileTree).queryByRole("heading", { name: "文件与任务" })).not.toBeInTheDocument();
+  expect(within(fileTree).queryByText("创建时间")).not.toBeInTheDocument();
+  await userEvent.click(within(fileTree).getByRole("treeitem", { name: "hello.py" }));
   expect(within(fileTree).queryByText("696e0318-4c7a-4e18-9930-ee444bd6faa8")).not.toBeInTheDocument();
-  expect(within(fileTree).getByText("OCT-1 完成控制台导航")).toBeInTheDocument();
-  expect(within(fileTree).getByText("验收报告")).toBeInTheDocument();
+  expect(within(fileTree).getByText("OCT-1 · engineer-1 · 只读")).toBeInTheDocument();
+  expect(within(fileTree).getByRole("link", { name: "查看任务" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
+  expect(within(fileTree).getByTitle("验收报告 内容")).toHaveAttribute(
+    "src",
+    "/api/assets/696e0318-4c7a-4e18-9930-ee444bd6faa8/content",
+  );
   expect(within(panel).queryByText("执行产物")).not.toBeInTheDocument();
   expect(within(panel).queryByText("代码提交 abc1234")).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/work-products", expect.objectContaining({ method: "GET" }));
@@ -512,9 +630,14 @@ it("uses organization scratch when the project has no workspace", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   const { container } = renderApp("/orgs/org-1/projects/project-1/configuration");
-  expect(await screen.findByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "工作区设置" })).toBeInTheDocument();
+  expect(screen.getByText("Basic settings")).toBeInTheDocument();
+  expect(screen.getByText("Workspace settings")).toBeInTheDocument();
   const flowHeadings = Array.from(container.querySelectorAll(".project-config-section h2"), (heading) => heading.textContent);
-  expect(flowHeadings).toEqual(["基础信息", "项目工作区", "组织草稿与产物", "任务运行记录"]);
+  expect(flowHeadings).toEqual(["基础设置", "工作区设置"]);
+  expect(screen.getByText("高级信息")).toBeInTheDocument();
+  expect(screen.getByText("运行管理")).toBeInTheDocument();
+  expect(screen.getByText("高级信息").closest("details")).toHaveAttribute("open");
   expect(screen.getByText("organizations/org-1/workspaces/artifacts")).toBeInTheDocument();
   expect(screen.getByText("尚未配置项目工作区")).toBeInTheDocument();
   expect(screen.getByText(/代码任务需先添加代码来源并选择执行模式/)).toBeInTheDocument();
@@ -601,6 +724,7 @@ it("shows the shared workspace overwrite notice in run history", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects/project-1/configuration");
+  await userEvent.click(await screen.findByText("运行管理"));
   const runHistory = await screen.findByRole("region", { name: "任务运行记录" });
   expect(await within(runHistory).findByText("共享运行")).toBeInTheDocument();
   expect(runHistory).toHaveTextContent("共享工作区不会隔离文件");
@@ -642,9 +766,10 @@ it("blocks project configuration save when goal IDs are not UUIDs", async () => 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects/project-1/configuration");
-  expect(await screen.findByRole("heading", { name: "基础信息" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "基础设置" })).toBeInTheDocument();
+  await userEvent.click(screen.getByText("系统信息与关联目标"));
   await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1");
-  await userEvent.click(screen.getByRole("button", { name: "保存基础信息" }));
+  await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
   expect(await screen.findByText("目标 ID 必须是 UUID，多个目标请用逗号分隔。")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalledWith(
@@ -741,19 +866,22 @@ it("manages project workspaces from the configuration tab", async () => {
 
   renderApp("/orgs/org-1/projects/project-1/configuration");
 
-  expect(await screen.findByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
-  await userEvent.type(screen.getByLabelText("代码来源本地 cwd"), "D:/coding/new");
+  expect(await screen.findByRole("heading", { name: "工作区设置" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("代码来源本地 cwd")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "添加工作区" })).toHaveClass("project-config-action");
   await userEvent.click(screen.getByRole("button", { name: "添加工作区" }));
+  await userEvent.type(screen.getByLabelText("代码来源本地 cwd"), "D:/coding/new");
+  await userEvent.click(screen.getByRole("button", { name: "确认添加" }));
   expect(screen.getByText("请先填写代码来源名称。")).toBeInTheDocument();
   await userEvent.clear(screen.getByLabelText("代码来源本地 cwd"));
   await userEvent.type(screen.getByLabelText("代码来源名称"), "新工作区");
-  await userEvent.click(screen.getByRole("button", { name: "添加工作区" }));
+  await userEvent.click(screen.getByRole("button", { name: "确认添加" }));
   expect(screen.getByText("本地 cwd 和仓库 URL 至少填写一项。")).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("代码来源本地 cwd"), "D:/coding/new");
   await userEvent.type(screen.getByLabelText("代码来源仓库 URL"), "https://example.com/new.git");
   await userEvent.type(screen.getByLabelText("代码来源分支"), "main");
   await userEvent.selectOptions(screen.getByLabelText("新工作区执行模式"), "operator_branch");
-  await userEvent.click(screen.getByRole("button", { name: "添加工作区" }));
+  await userEvent.click(screen.getByRole("button", { name: "确认添加" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/projects/project-1/workspaces",

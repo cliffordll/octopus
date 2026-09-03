@@ -104,7 +104,7 @@ from .logs import (
     finalize_local_file_log,
     read_local_file_log,
 )
-from .runtime_providers import inject_runtime_provider_config
+from .runtime_access import RuntimeAccessResolver
 from .run_lifecycle import RunFinalizationService, RunRecoveryService
 from .parent_continuation import ParentContinuationCoordinator
 from .parent_closeout_governance import ParentCloseoutGovernance
@@ -141,7 +141,7 @@ ISSUE_PASSIVE_FOLLOWUP_DELAY_DEFAULT_SECONDS = 30 * 60
 REVIEW_RESOLVED_BY_HUMAN_CODE = "review_resolved_by_human"
 REVIEW_SUPERSEDED_BY_ANOTHER_RUN_CODE = "review_superseded_by_another_run"
 RUN_RECOVERY_GRACE_SECONDS = 5 * 60
-HUMAN_INTERVENTION_ACTOR_TYPES = {"board", "user"}
+HUMAN_INTERVENTION_ACTOR_TYPES = {"user"}
 WAKEUP_TRIGGER_DETAIL_VALUES = {"manual", "ping", "callback", "system"}
 
 
@@ -1251,6 +1251,7 @@ class HeartbeatService:
         ):
             if run_ids is not None and terminal_run.id not in run_ids:
                 continue
+            self.recovery.authorize(terminal_run)
             await self._reconcile_terminal_effects(terminal_run)
         active_ids = (
             set().union(*self._active_run_ids.values())
@@ -1260,6 +1261,7 @@ class HeartbeatService:
         for run in await list_runs_by_status(self._session, "running"):
             if run_ids is not None and run.id not in run_ids:
                 continue
+            self.recovery.authorize(run)
             now = datetime.now(UTC)
             lease_expires_at = run.execution_lease_expires_at
             if lease_expires_at is not None:
@@ -2615,12 +2617,17 @@ class HeartbeatService:
                     workspace_data.get("cwd"), str
                 ):
                     runtime_config["cwd"] = workspace_data["cwd"]
-            runtime_config = await inject_runtime_provider_config(
-                self._session,
+            runtime_access = await RuntimeAccessResolver(self._session).resolve(
+                adapter=adapter,
+                run_id=running.id,
+                agent_id=agent.id,
                 org_id=agent.org_id,
                 runtime_type=agent.agent_runtime_type,
                 config=runtime_config,
+                env=workspace_env,
             )
+            runtime_config = runtime_access.config
+            workspace_env = runtime_access.env
             await self._commit_background_runtime_progress()
             result = await execute_adapter_with_progress(
                 RuntimeExecutionContext(

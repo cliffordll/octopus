@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from .activity import router as activity_router
+from .access import router as access_router
+from .auth import router as auth_router
 from .agents import router as agents_router
 from .approvals import router as approvals_router
 from .assets import router as assets_router
@@ -11,6 +13,7 @@ from .health import router as health_router
 from .issues import router as issues_router
 from .messenger import router as messenger_router
 from .organization_skills import router as organization_skills_router
+from .organization_hierarchy import router as organization_hierarchy_router
 from .orgs import router as orgs_router
 from .plugins import router as plugins_router
 from .projects import router as projects_router
@@ -24,11 +27,14 @@ from .workspace_operations import router as workspace_operations_router
 
 
 def register_routes(app: FastAPI) -> None:
+    app.include_router(access_router)
+    app.include_router(auth_router)
     app.include_router(health_router)
     app.include_router(activity_router)
     app.include_router(costs_router)
     app.include_router(orgs_router)
     app.include_router(organization_skills_router)
+    app.include_router(organization_hierarchy_router)
     app.include_router(assets_router)
     app.include_router(issues_router)
     app.include_router(approvals_router)

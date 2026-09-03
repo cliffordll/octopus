@@ -10,6 +10,7 @@ import type { ActivityEvent, Goal, GoalLevel, GoalStatus, IssueListItem, Project
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { GoalTree } from "../components/GoalTree";
+import { TertiaryPageHeader } from "../components/TertiaryPageShell";
 import { formatDateTime, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
@@ -159,22 +160,18 @@ export function GoalPage() {
   if (goal.error) return <ErrorNotice error={goal.error} />;
 
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
-        <div>
-          <Link className="back-link" to={`/orgs/${orgId}/goals`}>返回 Goals</Link>
-          <div className="agent-title-row">
-            <h1>{goal.data?.title ?? "Goal"}</h1>
-            {goal.data && <Badge>{statusLabel(goal.data.status)}</Badge>}
-          </div>
-        </div>
-        {goal.data && (
-          <div className="agent-header-actions">
+    <OrgWorkspace contentClassName="org-content-full goal-detail-content" orgId={orgId}>
+      <TertiaryPageHeader
+        actions={goal.data ? (
+          <>
             <button className="secondary" disabled={update.isPending} onClick={() => update.mutate({ status: "cancelled" })} type="button">Cancel goal</button>
             <button className="danger" disabled={remove.isPending || (dependencies.data?.blockers.length ?? 0) > 0} onClick={() => remove.mutate()} type="button">删除</button>
-          </div>
-        )}
-      </header>
+          </>
+        ) : undefined}
+        eyebrow={<><Link to={`/orgs/${orgId}/goals`}>Goals</Link><span> / Goal</span></>}
+        supporting={goal.data ? <Badge>{statusLabel(goal.data.status)}</Badge> : undefined}
+        title={goal.data?.title ?? "Goal"}
+      />
       {goal.data && (
         <>
           <div className="goal-summary-grid">

@@ -12,7 +12,7 @@ Use this skill when you are asked to hire or create an agent in control plane.
 You need either:
 
 - board access, or
-- agent permission `canCreateAgents=true` in your org
+- the explicit organization permission `agents:create`
 
 If you do not have this permission, escalate to your CEO or board.
 

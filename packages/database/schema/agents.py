@@ -49,9 +49,6 @@ class Agent(Base):
     paused_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    permissions: Mapped[dict[str, Any]] = mapped_column(
-        JSON().with_variant(JSONB(), "postgresql"), nullable=False, default=dict
-    )
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

@@ -5,13 +5,39 @@ import { organizationsApi } from "../api/organizations";
 import { initializeLocalePreference, LOCALE_CHANGE_EVENT } from "../utils/locale";
 import { AgentCreateDialog } from "../pages/NewAgentPage";
 import { ProjectCreateDialog } from "../pages/ProjectsPage";
-import { OrganizationSettingsPanel } from "./OrganizationSettingsPanel";
+import { OrganizationSettingsPanel, type SettingsSection } from "./OrganizationSettingsPanel";
+import { SidebarAccountMenu } from "./SidebarAccountMenu";
+import { SidebarNavItem } from "./SidebarNavItem";
+import { SidebarIcon } from "./SidebarIcon";
+
+const ORGANIZATION_AREA_SECTIONS = new Set([
+  "structure",
+  "members",
+  "projects",
+  "heartbeat-runs",
+  "run-intelligence",
+  "costs",
+  "resources",
+  "workspaces",
+  "goals",
+  "skills",
+  "settings",
+]);
+const MESSAGE_AREA_SECTIONS = new Set(["chats", "messenger", "approvals"]);
+const ORGANIZATION_SCOPED_SECTIONS = new Set([
+  ...ORGANIZATION_AREA_SECTIONS,
+  ...MESSAGE_AREA_SECTIONS,
+  "issues",
+  "agents",
+]);
+
+function currentOrganizationSection(pathname: string) {
+  return pathname.match(/^\/orgs\/[^/]+\/([^/]+)/)?.[1];
+}
 
 function organizationTarget(pathname: string, orgId: string) {
-  const section = pathname.match(
-    /^\/orgs\/[^/]+\/(chats|messenger|issues|agents|projects|approvals|structure|heartbeat-runs|run-intelligence|settings)/,
-  )?.[1];
-  return `/orgs/${orgId}/${section ?? "issues"}`;
+  const section = currentOrganizationSection(pathname);
+  return `/orgs/${orgId}/${section && ORGANIZATION_SCOPED_SECTIONS.has(section) ? section : "issues"}`;
 }
 
 export function AppShell() {
@@ -21,12 +47,14 @@ export function AppShell() {
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
   const [locale, setLocale] = useState(() => initializeLocalePreference());
   const productMenuRef = useRef<HTMLDivElement>(null);
   const quickCreateRef = useRef<HTMLDivElement>(null);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
-  const isMessagesArea = /^\/orgs\/[^/]+\/(chats|messenger|approvals)/.test(location.pathname);
-  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|run-intelligence|resources|workspaces|goals|skills|settings)/.test(location.pathname);
+  const activeSection = currentOrganizationSection(location.pathname) ?? "";
+  const isMessagesArea = MESSAGE_AREA_SECTIONS.has(activeSection);
+  const isOrganizationArea = ORGANIZATION_AREA_SECTIONS.has(activeSection);
   const activeOrganizationId = location.pathname.match(/^\/orgs\/([^/]+)/)?.[1];
   const organizations = useQuery({
     queryKey: ["organizations"],
@@ -36,6 +64,9 @@ export function AppShell() {
   const selectedOrganization =
     organizationList.find((organization) => organization.id === activeOrganizationId) ?? organizationList[0];
   const selectedOrganizationId = activeOrganizationId ?? selectedOrganization?.id;
+  const organizationMenuHint = selectedOrganization?.name
+    ? `${selectedOrganization.name} · 切换组织`
+    : "选择或创建组织";
 
   useEffect(() => {
     function rerenderOnLocaleChange() {
@@ -85,6 +116,8 @@ export function AppShell() {
           <button
             aria-expanded={organizationMenuOpen}
             aria-label="组织菜单"
+            aria-description={organizationMenuHint}
+            title={organizationMenuHint}
             className="product-mark product-menu-trigger"
             onClick={() => {
               setOrganizationMenuOpen((open) => !open);
@@ -93,6 +126,9 @@ export function AppShell() {
             type="button"
           >
             {(selectedOrganization?.name ?? activeOrganizationId ?? "O").slice(0, 1).toUpperCase()}
+            <svg aria-hidden="true" focusable="false" className="product-menu-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m3 4.5 3 3 3-3" />
+            </svg>
           </button>
           {organizationMenuOpen && (
             <nav aria-label="组织切换菜单" className="organization-menu product-organization-menu">
@@ -120,7 +156,6 @@ export function AppShell() {
           )}
         </div>
         <div className="product">Octopus</div>
-        <div className="product-subtitle">Control plane</div>
         <nav className="global-nav" aria-label="主导航">
           {selectedOrganizationId ? (
             <>
@@ -128,24 +163,24 @@ export function AppShell() {
                 <button
                   aria-expanded={quickCreateOpen}
                   aria-label="快速创建"
-                  className="quick-create-trigger"
+                  className="quick-create-trigger sidebar-icon-button"
+                  title="创建"
                   onClick={() => {
                     setQuickCreateOpen((open) => !open);
                     setOrganizationMenuOpen(false);
                   }}
                   type="button"
                 >
-                  <span aria-hidden="true" className="nav-icon">+</span>
-                  <span>创建</span>
+                  <SidebarIcon name="create" />
                 </button>
                 {quickCreateOpen && (
                   <nav aria-label="快速创建菜单" className="quick-create-menu">
                     <Link onClick={() => setQuickCreateOpen(false)} to={`/orgs/${selectedOrganizationId}/chats`}>
-                      <span aria-hidden="true" className="context-entry-icon">M</span>
+                      <SidebarIcon name="messages" />
                       创建新聊天
                     </Link>
                     <Link onClick={() => setQuickCreateOpen(false)} to={`/orgs/${selectedOrganizationId}/issues?create=1`}>
-                      <span aria-hidden="true" className="context-entry-icon">T</span>
+                      <SidebarIcon name="issues" />
                       创建新任务
                     </Link>
                     <button
@@ -155,7 +190,7 @@ export function AppShell() {
                       }}
                       type="button"
                     >
-                      <span aria-hidden="true" className="context-entry-icon">A</span>
+                      <SidebarIcon name="agents" />
                       创建智能体
                     </button>
                     <button
@@ -165,55 +200,48 @@ export function AppShell() {
                       }}
                       type="button"
                     >
-                      <span aria-hidden="true" className="context-entry-icon">P</span>
+                      <SidebarIcon name="projects" />
                       创建新项目
                     </button>
                   </nav>
                 )}
               </div>
-              <NavLink className={isMessagesArea ? "active" : undefined} to={`/orgs/${selectedOrganizationId}/chats`}>
-                <span aria-hidden="true" className="nav-icon">M</span>
-                <span>消息</span>
-              </NavLink>
-              <NavLink to={`/orgs/${selectedOrganizationId}/agents`}>
-                <span aria-hidden="true" className="nav-icon">A</span>
-                <span>智能体</span>
-              </NavLink>
-              <NavLink to={`/orgs/${selectedOrganizationId}/issues`}>
-                <span aria-hidden="true" className="nav-icon">T</span>
-                <span>任务</span>
-              </NavLink>
             </>
           ) : (
             <>
-              <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">+</span>创建</span>
-              <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">M</span>消息</span>
-              <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">A</span>智能体</span>
-              <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">T</span>任务</span>
+              <button aria-label="快速创建" className="quick-create-trigger sidebar-icon-button" disabled title="创建" type="button">
+                <SidebarIcon name="create" />
+              </button>
             </>
           )}
-          {selectedOrganizationId ? (
-            <NavLink className={isOrganizationArea ? "active" : undefined} to={`/orgs/${selectedOrganizationId}/structure`}>
-              <span aria-hidden="true" className="nav-icon">O</span>
-              <span>组织</span>
-            </NavLink>
-          ) : (
-            <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">O</span>组织</span>
-          )}
+          <SidebarNavItem item="messages" active={isMessagesArea} to={selectedOrganizationId ? `/orgs/${selectedOrganizationId}/chats` : undefined} />
+          <SidebarNavItem item="agents" to={selectedOrganizationId ? `/orgs/${selectedOrganizationId}/agents` : undefined} />
+          <SidebarNavItem item="issues" to={selectedOrganizationId ? `/orgs/${selectedOrganizationId}/issues` : undefined} />
+          <SidebarNavItem item="organization" active={isOrganizationArea} to={selectedOrganizationId ? `/orgs/${selectedOrganizationId}/structure` : undefined} />
         </nav>
-        <div className="sidebar-settings">
+        <div className="sidebar-footer">
           <button
             aria-label="设置"
+            className="sidebar-settings-trigger sidebar-icon-button"
+            title="设置"
+            aria-haspopup="dialog"
+            aria-expanded={settingsOpen}
             onClick={() => {
               setOrganizationMenuOpen(false);
               setQuickCreateOpen(false);
+              setSettingsSection("providers");
               setSettingsOpen(true);
             }}
             type="button"
           >
-            <span aria-hidden="true" className="nav-icon">S</span>
-            <span>设置</span>
+            <SidebarIcon name="settings" />
           </button>
+          <SidebarAccountMenu
+            onOpenAccount={() => {
+              setSettingsSection("account");
+              setSettingsOpen(true);
+            }}
+          />
         </div>
       </aside>
       <main className={`workspace ${isOrganizationWorkspace ? "workspace-org" : "workspace-global"}`} key={locale}>
@@ -237,7 +265,7 @@ export function AppShell() {
                 关闭
               </button>
             </div>
-            <OrganizationSettingsPanel orgId={selectedOrganizationId} />
+            <OrganizationSettingsPanel initialSection={settingsSection} orgId={selectedOrganizationId} />
           </div>
         </div>
       )}

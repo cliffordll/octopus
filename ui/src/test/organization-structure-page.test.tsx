@@ -9,15 +9,20 @@ afterEach(() => {
 });
 
 it("shows current reporting relationships in the organization structure", async () => {
-  const agents = [
-    { id: "agent-ceo", name: "Founder", role: "ceo", status: "idle", reportsTo: null },
-    { id: "agent-1", name: "Builder", role: "engineer", status: "active", reportsTo: "agent-ceo" },
+  const members = [
+    { id: "role-owner", orgId: "org-1", principalType: "user", principalId: "user-owner", displayName: "Owner", role: "owner", status: "active", reportsTo: null },
+    { id: "role-ceo", orgId: "org-1", principalType: "agent", principalId: "agent-ceo", displayName: "Founder", role: "member", status: "active", reportsTo: "role-owner" },
+    { id: "role-human", orgId: "org-1", principalType: "user", principalId: "user-1", displayName: "Human 1", role: "member", status: "active", reportsTo: "role-owner" },
+    { id: "role-builder", orgId: "org-1", principalType: "agent", principalId: "agent-1", displayName: "Builder", role: "member", status: "active", reportsTo: "role-ceo" },
   ];
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs" && init?.method === "GET") {
       return respond([{ id: "org-1", name: "核心团队", status: "active" }]);
     }
-    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond(agents);
+    if (path === "/api/orgs/org-1/hierarchy") return respond(members);
+    if (path === "/api/orgs/org-1/hierarchy/role-builder/manager" && init?.method === "PATCH") {
+      return respond({ ...members[3], reportsTo: "role-human" });
+    }
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -25,10 +30,33 @@ it("shows current reporting relationships in the organization structure", async 
   renderApp("/orgs/org-1/structure");
 
   expect(await screen.findByRole("heading", { name: "组织架构" })).toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { name: "组织", level: 2 })).toHaveLength(1);
+  expect(within(screen.getByRole("navigation", { name: "组织导航" })).queryByRole("heading", { name: "组织" })).not.toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("heading", { name: "组织管理" })).toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("heading", { name: "项目" })).toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("link", { name: "工作区" }))
     .toHaveAttribute("href", "/orgs/org-1/workspaces");
+  expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("link", { name: "成员" }))
+    .toHaveAttribute("href", "/orgs/org-1/members");
   expect(await screen.findByText("Builder")).toBeInTheDocument();
   expect(await screen.findByText("向 Founder 汇报")).toBeInTheDocument();
+  expect(screen.getByText("Owner")).toBeInTheDocument();
+  expect(screen.getByText("Human 1")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "组织关系画布" })).toContainElement(
+    screen.getByTestId("organization-chart-canvas"),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "调整架构" }));
+  await userEvent.click(
+    within(screen.getByRole("article", { name: /Builder/ })).getByRole("button", { name: "调整上级" }),
+  );
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "直属上级" }), "role-human");
+  await userEvent.click(screen.getByRole("button", { name: "保存调整" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/hierarchy/role-builder/manager",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ managerId: "role-human" }) }),
+  );
 });
 
 it("shows the organization workspace file tree and editor", async () => {
@@ -82,12 +110,14 @@ it("shows the organization workspace file tree and editor", async () => {
 
   renderApp("/orgs/org-1/workspaces");
 
-  expect(await screen.findByRole("heading", { name: "工作区" })).toBeInTheDocument();
+  const workspaceHeading = await screen.findByRole("heading", { name: "工作区" });
+  expect(workspaceHeading.closest(".org-content")).toHaveClass("organization-fullscreen-detail", "organization-workspaces-content");
   expect(screen.getByTestId("org-workspaces-files-card")).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-editor-card")).toBeInTheDocument();
+  expect(screen.getByTestId("org-workspaces-files-card").closest(".file-browser")).toHaveClass("framed");
   expect(screen.getByRole("heading", { name: "文件" })).toBeInTheDocument();
-  expect(screen.getByText("组织工作区根目录")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "内容" })).toBeInTheDocument();
+  expect(screen.queryByText("组织工作区根目录")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "内容" })).not.toBeInTheDocument();
   expect(screen.queryByText("Project Workspaces")).not.toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "项目工作区" })).not.toBeInTheDocument();
   expect(await screen.findByText("artifacts")).toBeInTheDocument();
@@ -106,6 +136,8 @@ it("shows the organization workspace file tree and editor", async () => {
   expect([...topLevelOrder].sort((left, right) => left - right)).toEqual(topLevelOrder);
   await userEvent.click(screen.getByRole("button", { name: /artifacts/ }));
   await userEvent.click(await screen.findByRole("button", { name: /summary.md/ }));
+  expect(screen.getByRole("heading", { name: "summary.md · artifacts" })).toBeInTheDocument();
+  expect(screen.getByText("只读")).toBeInTheDocument();
   expect(await screen.findByLabelText("工作区文件内容")).toHaveValue("# Summary\n\nhello");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/workspace/files?path=artifacts",
@@ -160,15 +192,15 @@ it("keeps the selected workspace file from the path query", async () => {
 });
 
 it("routes an organization root to the empty structure state", async () => {
-  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
-    if (path === "/api/orgs/org-empty/agents" && init?.method === "GET") return respond([]);
+  const fetchMock = vi.fn((path: string) => {
+    if (path === "/api/orgs/org-empty/hierarchy") return respond([]);
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-empty");
 
-  expect(await screen.findByText("暂无智能体。创建首个智能体以建立组织架构。")).toBeInTheDocument();
+  expect(await screen.findByText("暂无组织成员。邀请 Human 或创建智能体以建立组织架构。")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "新建智能体" })).toHaveAttribute(
     "href",
     "/orgs/org-empty/agents/new",
@@ -260,10 +292,37 @@ it("shows organization cost reporting on the organization costs route", async ()
 
   renderApp("/orgs/org-1/costs");
 
-  expect((await screen.findAllByRole("heading", { name: "成本" })).length).toBeGreaterThanOrEqual(1);
+  const costHeading = await screen.findByRole("heading", { name: "成本", level: 1 });
+  const costHeader = costHeading.closest("header")!;
+  expect(costHeader).toHaveClass("page-header");
+  expect(costHeader.closest(".org-content")).toHaveClass("org-content-full", "organization-fullscreen-detail", "organization-costs-content");
+  expect(costHeader.nextElementSibling).toHaveClass("tertiary-page-viewport", "tertiary-page-viewport-contained");
+  expect(within(screen.getByRole("navigation", { name: "主导航" })).getByRole("link", { name: "组织" })).toHaveClass("active");
+  expect(within(costHeader).getByText("Organization Costs")).toHaveClass("eyebrow");
+  expect(within(costHeader).getByText("按智能体、服务商、计费方和项目查看运行成本。")).toHaveClass("tertiary-page-supporting");
+  expect(screen.getAllByRole("heading", { name: "成本" })).toHaveLength(1);
   expect((await screen.findAllByText("$42.34")).length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText("agent-1")).toBeInTheDocument();
   expect(screen.getByText("openai")).toBeInTheDocument();
   expect(screen.getByText("platform")).toBeInTheDocument();
   expect(screen.getByText("project-1")).toBeInTheDocument();
+});
+
+it("shows one informative empty state when the organization has no cost data", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/costs/summary" && init?.method === "GET") {
+      return respond({ totalCostCents: 0, eventCount: 0, inputTokens: 0, outputTokens: 0 });
+    }
+    if (path.startsWith("/api/orgs/org-1/costs/") && init?.method === "GET") return respond([]);
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/costs");
+
+  expect(await screen.findByRole("heading", { name: "暂无成本数据" })).toBeInTheDocument();
+  expect(screen.getByText("智能体运行并上报 token 与费用后，成本会自动出现在这里。")).toBeInTheDocument();
+  expect(screen.getByLabelText("成本汇总维度")).toHaveTextContent("智能体Provider计费方项目");
+  expect(screen.queryByRole("heading", { name: "按智能体" })).not.toBeInTheDocument();
+  expect(screen.queryByText("暂无成本记录。")).not.toBeInTheDocument();
 });

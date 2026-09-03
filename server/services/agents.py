@@ -84,6 +84,16 @@ from packages.shared.types.agent import (
 from packages.shared.types.heartbeat import InstanceSchedulerHeartbeatAgent
 from packages.shared.types.approval import CreateApprovalPayload
 from packages.runtimes import get_runtime_adapter
+from server.access import (
+    AccessDeniedError,
+    AccessPolicyService,
+    PermissionService,
+    PermissionSpec,
+)
+from server.identity import PrincipalRef
+from server.identity.resolver import IdentityContextResolver
+from server.organization_hierarchy import OrganizationHierarchyService
+from server.roles import RoleService
 
 from .agent_instructions import (
     materialize_default_instructions_for_new_agent,
@@ -285,12 +295,6 @@ def _timestamp_desc_rank(value: str | None) -> float:
     except ValueError:
         return 0.0
     return -parsed.timestamp()
-
-
-def _normalized_permissions(value: object, role: str) -> dict[str, bool]:
-    if isinstance(value, dict) and isinstance(value.get("canCreateAgents"), bool):
-        return {"canCreateAgents": bool(value["canCreateAgents"])}
-    return {"canCreateAgents": role == "ceo"}
 
 
 def _sanitize_value(value: Any) -> Any:
@@ -663,6 +667,9 @@ def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
 class AgentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._roles = RoleService(session)
+        self._permissions = PermissionService(session)
+        self._hierarchy = OrganizationHierarchyService(session)
 
     async def list_for_org(self, org_id: str) -> list[Agent]:
         rows = await list_org_agents(self._session, org_id)
@@ -733,7 +740,7 @@ class AgentService:
         detail: AgentDetail = {
             **self._to_agent(row, await list_enabled_skill_keys(self._session, row.id)),
             "chainOfCommand": await self._chain_of_command(row),
-            "access": self._access_state(row),
+            "access": await self._access_state(row),
         }
         return detail
 
@@ -852,16 +859,23 @@ class AgentService:
         actor_type: str,
         actor_id: str,
     ) -> None:
-        if actor_type == "board":
+        if actor_type in {"user", "agent"}:
+            context = await IdentityContextResolver(self._session).resolve(
+                actor_type=actor_type,
+                actor_id=actor_id,
+                org_id=org_id,
+                source="agent_hire",
+            )
+            try:
+                AccessPolicyService().require_permission(
+                    context, org_id, "agents:create"
+                )
+            except AccessDeniedError as exc:
+                raise PermissionError(
+                    "Principal does not have permission to create agents"
+                ) from exc
             return
-        if actor_type != "agent":
-            raise PermissionError("Only board or agent actors can hire agents")
-        actor_agent = await get_agent_by_id(self._session, actor_id)
-        if actor_agent is None or actor_agent.org_id != org_id:
-            raise PermissionError("Agent cannot hire agents for another organization")
-        permissions = _normalized_permissions(actor_agent.permissions, actor_agent.role)
-        if not permissions["canCreateAgents"]:
-            raise PermissionError("Agent does not have permission to create agents")
+        raise PermissionError("Only Human or Agent actors can hire agents")
 
     async def _create_agent(
         self,
@@ -913,10 +927,34 @@ class AgentService:
             ),
             "budget_monthly_cents": payload.get("budgetMonthlyCents", 0),
             "spent_monthly_cents": 0,
-            "permissions": _normalized_permissions(payload.get("permissions"), role),
             "metadata_json": payload.get("metadata"),
         }
         row = await create_agent(self._session, values)
+        principal = PrincipalRef(type="agent", id=row.id)
+        access_role = await self._roles.ensure(
+            "organization", org_id, principal, role="member", status="active"
+        )
+        manager_role = (
+            await self._roles.get(
+                "organization",
+                org_id,
+                PrincipalRef(type="agent", id=manager_id),
+            )
+            if manager_id is not None
+            else None
+        )
+        await self._hierarchy.set_manager(
+            org_id,
+            access_role.id,
+            manager_role.id if manager_role is not None else None,
+        )
+        await self._permissions.replace(
+            "organization",
+            org_id,
+            principal,
+            [PermissionSpec(permission="tasks:assign")],
+            granted_by_user_id=(actor_id if actor_type == "user" else None),
+        )
         agent_home = _ensure_agent_workspace_layout(
             _agent_home_root_from_values(values)
         )
@@ -1056,6 +1094,27 @@ class AgentService:
         row = await update_agent(self._session, agent_id, values)
         if row is None:
             return None
+        if "reportsTo" in payload:
+            access_role = await self._roles.get(
+                "organization",
+                row.org_id,
+                PrincipalRef(type="agent", id=row.id),
+            )
+            manager_role = (
+                await self._roles.get(
+                    "organization",
+                    row.org_id,
+                    PrincipalRef(type="agent", id=payload["reportsTo"]),
+                )
+                if payload["reportsTo"] is not None
+                else None
+            )
+            if access_role is not None:
+                await self._hierarchy.set_manager(
+                    row.org_id,
+                    access_role.id,
+                    manager_role.id if manager_role is not None else None,
+                )
         if desired_skills is not None:
             desired_skills = await replace_enabled_skill_keys(
                 self._session,
@@ -1500,9 +1559,6 @@ class AgentService:
                     _materialize_heartbeat_runtime_config(row.runtime_config)
                 ),
             ),
-            "permissions": cast(
-                Any, _normalized_permissions(row.permissions, row.role)
-            ),
             "updatedAt": row.updated_at.isoformat(),
         }
 
@@ -1784,12 +1840,50 @@ class AgentService:
             manager_id = manager.reports_to
         return chain
 
-    def _access_state(self, row: AgentRow) -> AgentAccessState:
+    async def _access_state(self, row: AgentRow) -> AgentAccessState:
+        principal = PrincipalRef(type="agent", id=row.id)
+        access_role = await self._roles.get("organization", row.org_id, principal)
+        permissions = await self._permissions.list(
+            "organization", row.org_id, principal
+        )
+        has_task_assign_grant = any(
+            permission.permission_key == "tasks:assign" for permission in permissions
+        )
+        if has_task_assign_grant:
+            task_assign_source = "explicit_grant"
+        else:
+            task_assign_source = "none"
         return {
-            "canAssignTasks": row.role == "ceo",
-            "taskAssignSource": "ceo_role" if row.role == "ceo" else "none",
-            "membership": None,
-            "grants": [],
+            "canAssignTasks": task_assign_source != "none",
+            "taskAssignSource": task_assign_source,
+            "role": (
+                {
+                    "id": access_role.id,
+                    "orgId": access_role.scope_id,
+                    "principalType": access_role.principal_type,
+                    "principalId": access_role.principal_id,
+                    "status": access_role.status,
+                    "role": access_role.role,
+                    "createdAt": access_role.created_at.isoformat(),
+                    "updatedAt": access_role.updated_at.isoformat(),
+                }
+                if access_role is not None
+                else None
+            ),
+            "permissions": [
+                {
+                    "id": permission.id,
+                    "orgId": permission.scope_id,
+                    "principalType": permission.principal_type,
+                    "principalId": permission.principal_id,
+                    "permissionKey": permission.permission_key,
+                    "constraints": permission.constraints,
+                    "grantedByUserId": permission.granted_by_user_id,
+                    "createdAt": permission.created_at.isoformat(),
+                    "updatedAt": permission.updated_at.isoformat(),
+                }
+                for permission in permissions
+            ],
         }
 
     def _to_agent(
@@ -1814,9 +1908,6 @@ class AgentService:
             "spentMonthlyCents": row.spent_monthly_cents,
             "pauseReason": cast(PauseReason | None, row.pause_reason),
             "pausedAt": _iso(row.paused_at),
-            "permissions": cast(
-                Any, _normalized_permissions(row.permissions, row.role)
-            ),
             "lastHeartbeatAt": _iso(row.last_heartbeat_at),
             "metadata": row.metadata_json,
             "createdAt": row.created_at.isoformat(),

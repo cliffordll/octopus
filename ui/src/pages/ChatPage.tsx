@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type FormEvent, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { approvalsApi } from "../api/approvals";
 import { chatsApi } from "../api/chats";
-import type { ChatConversation, ChatMessage } from "../api/types";
+import type { ApprovalDetail, ChatConversation, ChatMessage } from "../api/types";
 import { Badge } from "../components/Badge";
+import { ChatComposerContextBar } from "../components/ChatComposerContextBar";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { TertiaryPageHeader, TertiaryPageShell, TertiaryPageViewport } from "../components/TertiaryPageShell";
 import { formatBytes, roleLabel, statusLabel } from "../utils/display";
 
 interface ChatRouteState {
@@ -67,6 +69,8 @@ function issueProposalRequiresLabelSelection(proposal: Record<string, unknown>):
 }
 
 const missingAssistantReplyMessage = "智能体没有返回消息。请检查所选智能体运行配置后重试。";
+const chatMessageSyncIntervalMs = 2_000;
+const chatApprovalSyncIntervalMs = 2_000;
 
 function skillLabel(entry: Record<string, unknown>) {
   const value = entry.selectionKey ?? entry.key ?? entry.runtimeName ?? entry.name ?? entry.slug ?? entry.id ?? entry.shortName;
@@ -83,21 +87,16 @@ function chatIssueCreationModeLabel(mode: string | null | undefined): string {
 }
 
 type ChatApprovalPromptStatus = "pending" | "revision_requested" | "approved" | "rejected" | "cancelled";
-type ChatApprovalPromptAction = "approve" | "requestRevision" | "reject";
 type ChatLinkedIssueSummary = NonNullable<ChatConversation["primaryIssue"]> & {
   parentId?: string | null;
 };
 
 function chatApprovalStatusLabel(status: ChatApprovalPromptStatus): string {
-  if (status === "revision_requested") return "需修改";
+  if (status === "revision_requested") return "已退回";
   if (status === "approved") return "已同意";
   if (status === "rejected") return "已拒绝";
   if (status === "cancelled") return "已取消";
   return "待审批";
-}
-
-function focusLeftElement(event: ReactFocusEvent<HTMLElement>) {
-  return !(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget);
 }
 
 export function ChatPage() {
@@ -111,17 +110,15 @@ export function ChatPage() {
   const [thinkingChatId, setThinkingChatId] = useState<string | null>(null);
   const [streamingReply, setStreamingReply] = useState("");
   const [initialMessageInFlight, setInitialMessageInFlight] = useState(Boolean(routeState?.initialMessage));
-  const [skillDropdownOpen, setSkillDropdownOpen] = useState(false);
   const [approvalPrompt, setApprovalPrompt] = useState<{
     approvalId: string;
     proposal: Record<string, unknown>;
     sourceMessageId: string;
     status: ChatApprovalPromptStatus;
   } | null>(null);
-  const [dismissedApprovalIds, setDismissedApprovalIds] = useState<Set<string>>(() => new Set());
   const messageThreadRef = useRef<HTMLDivElement | null>(null);
-  const skillDropdownRef = useRef<HTMLDetailsElement | null>(null);
   const initialMessageStartedRef = useRef<string | null>(null);
+  const syncedApprovalResultRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const cachedChat = queryClient.getQueryData<ChatConversation>(["chat", chatId])
@@ -146,6 +143,9 @@ export function ChatPage() {
     queryFn: () => chatsApi.listMessages(chatId),
     enabled: !initialMessageInFlight,
     staleTime: 1000,
+    refetchInterval: chatMessageSyncIntervalMs,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
   });
   const selectedAgentSkills = useQuery({
     queryKey: ["agent-skills", agentId],
@@ -156,24 +156,16 @@ export function ChatPage() {
     queryKey: ["approval", approvalPrompt?.approvalId],
     queryFn: () => approvalsApi.get(approvalPrompt?.approvalId ?? ""),
     enabled: Boolean(approvalPrompt?.approvalId),
+    refetchInterval: (query) => {
+      const status = (query.state.data as ApprovalDetail | undefined)?.status;
+      return status && status !== "pending" ? false : chatApprovalSyncIntervalMs;
+    },
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
   });
   const approvalPromptStatus = (
     approvalPromptDetail.data?.status as ChatApprovalPromptStatus | undefined
   ) ?? approvalPrompt?.status ?? null;
-  useEffect(() => {
-    if (!skillDropdownOpen) return;
-    function closeWhenOutside(event: Event) {
-      if (event.target instanceof Node && !skillDropdownRef.current?.contains(event.target)) {
-        setSkillDropdownOpen(false);
-      }
-    }
-    document.addEventListener("pointerdown", closeWhenOutside);
-    document.addEventListener("focusin", closeWhenOutside);
-    return () => {
-      document.removeEventListener("pointerdown", closeWhenOutside);
-      document.removeEventListener("focusin", closeWhenOutside);
-    };
-  }, [skillDropdownOpen]);
   const visibleMessages = useMemo(() => {
     const persisted = messages.data ?? [];
     const persistedUserBodies = new Set(
@@ -198,45 +190,39 @@ export function ChatPage() {
     return sourceMessageIds;
   }, [visibleMessages]);
   useEffect(() => {
-    if (!orgId || !chatId || approvalPrompt) return;
+    if (!orgId || !chatId) return;
     const proposalMessage = [...visibleMessages].reverse().find((message) =>
       Boolean(
         message.approvalId
-        && !dismissedApprovalIds.has(message.approvalId)
-        && !createdIssueSourceMessageIds.has(message.id)
         && issueProposalFromMessage(message),
       ),
     );
-    if (!proposalMessage?.approvalId) return;
+    if (!proposalMessage?.approvalId) {
+      setApprovalPrompt(null);
+      return;
+    }
     const proposal = issueProposalFromMessage(proposalMessage);
     if (!proposal) return;
-    setApprovalPrompt({
-      approvalId: proposalMessage.approvalId,
-      proposal,
-      sourceMessageId: proposalMessage.id,
-      status: "pending",
+    setApprovalPrompt((current) => {
+      if (current?.approvalId === proposalMessage.approvalId && current.sourceMessageId === proposalMessage.id) return current;
+      return {
+        approvalId: proposalMessage.approvalId,
+        proposal,
+        sourceMessageId: proposalMessage.id,
+        status: "pending",
+      };
     });
-  }, [approvalPrompt, chatId, createdIssueSourceMessageIds, dismissedApprovalIds, orgId, visibleMessages]);
+  }, [chatId, orgId, visibleMessages]);
   useEffect(() => {
-    if (!approvalPrompt) return;
-    if (createdIssueSourceMessageIds.has(approvalPrompt.sourceMessageId)) setApprovalPrompt(null);
-  }, [approvalPrompt, createdIssueSourceMessageIds]);
-  useEffect(() => {
-    if (!approvalPrompt || approvalPromptStatus !== "approved") return;
+    if (!approvalPrompt || !approvalPromptStatus || approvalPromptStatus === "pending") return;
+    const syncKey = `${approvalPrompt.approvalId}:${approvalPromptStatus}`;
+    if (syncedApprovalResultRef.current === syncKey) return;
+    syncedApprovalResultRef.current = syncKey;
     void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
     void queryClient.invalidateQueries({ queryKey: ["chat-messages", chatId] });
-    const timer = window.setTimeout(() => {
-      setDismissedApprovalIds((current) => new Set(current).add(approvalPrompt.approvalId));
-      setApprovalPrompt(null);
-    }, 4000);
-    return () => window.clearTimeout(timer);
-  }, [approvalPrompt, approvalPromptStatus, chatId, queryClient]);
-  useEffect(() => {
-    if (!approvalPrompt) return;
-    if (!approvalPromptStatus || approvalPromptStatus === "pending" || approvalPromptStatus === "approved") return;
-    setDismissedApprovalIds((current) => new Set(current).add(approvalPrompt.approvalId));
-    setApprovalPrompt(null);
-  }, [approvalPrompt, approvalPromptStatus]);
+    void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
+    void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+  }, [approvalPrompt, approvalPromptStatus, chatId, orgId, queryClient]);
   useEffect(() => {
     const messageThread = messageThreadRef.current;
     if (!messageThread) return;
@@ -302,37 +288,6 @@ export function ChatPage() {
     onSuccess: (updatedChat) => {
       queryClient.setQueryData(["chat", chatId], updatedChat);
       void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
-    },
-    onError: (error) => {
-      setSendNotice(displayError(error));
-    },
-  });
-  const decideIssueProposal = useMutation({
-    mutationFn: ({ action, approvalId }: { action: ChatApprovalPromptAction; approvalId: string }) => {
-      if (action === "reject") return approvalsApi.reject(approvalId);
-      if (action === "requestRevision") return approvalsApi.requestRevision(approvalId);
-      return approvalsApi.approve(approvalId);
-    },
-    onSuccess: (approval) => {
-      const nextStatus = approval.status as ChatApprovalPromptStatus;
-      setApprovalPrompt((current) => {
-        if (current?.approvalId !== approval.id) return current;
-        return nextStatus === "pending" || nextStatus === "approved"
-          ? { ...current, status: nextStatus }
-          : null;
-      });
-      if (nextStatus !== "pending" && nextStatus !== "approved") {
-        setDismissedApprovalIds((current) => new Set(current).add(approval.id));
-      }
-      void queryClient.invalidateQueries({ queryKey: ["approval", approval.id] });
-      void queryClient.invalidateQueries({ queryKey: ["approval-issues", approval.id] });
-      void queryClient.invalidateQueries({ queryKey: ["messenger-approvals", orgId] });
-      void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
-      void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
-      void queryClient.invalidateQueries({ queryKey: ["chat-messages", chatId] });
-      void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
-      void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
-      void queryClient.invalidateQueries({ queryKey: ["issue"] });
     },
     onError: (error) => {
       setSendNotice(displayError(error));
@@ -460,18 +415,18 @@ export function ChatPage() {
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       {chat.data && (
-        <section className="chat-thread-shell">
-          <header className="chat-thread-header">
-            <div>
-              <h1>{chat.data.title}</h1>
-              <p>{boundChatAgentName ? `使用 ${boundChatAgentName}` : "选择智能体后发送消息"}</p>
-            </div>
-            <div className="meta-line">
+        <TertiaryPageShell className="chat-thread-shell">
+          <TertiaryPageHeader
+            eyebrow="Conversation"
+            supporting={<>
+              <span>{boundChatAgentName ? `使用 ${boundChatAgentName}` : "选择智能体后发送消息"}</span>
               <Badge>{statusLabel(chat.data.status)}</Badge>
               {chat.data.isPinned && <Badge>已置顶</Badge>}
               {chat.data.unreadCount ? <Badge>{chat.data.unreadCount} 未读</Badge> : null}
-            </div>
-          </header>
+            </>}
+            title={chat.data.title}
+          />
+          <TertiaryPageViewport className="chat-thread-content tertiary-page-viewport-contained">
           {linkedIssues.length > 0 && (
             <div aria-label="关联任务" className="chat-linked-issues-strip">
               {linkedIssues.map((issue) => (
@@ -502,11 +457,15 @@ export function ChatPage() {
             {visibleMessages.map((message) => {
               const issueProposal = issueProposalFromMessage(message);
               const issueCreatedEvent = issueCreatedEventFromMessage(message);
+              if (issueCreatedEvent && linkedIssueById.has(issueCreatedEvent.issueId)) return null;
               return (
-                <article className={`chat-message ${message.role}`} key={message.id}>
-                  {message.role === "assistant" && (
+                <Fragment key={message.id}>
+                <article className={`chat-message ${message.role}`}>
+                  {message.role !== "user" && (
                     <span aria-hidden="true" className="chat-agent-avatar">
-                      {agentAvatarLabel(message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName)}
+                      {message.role === "assistant"
+                        ? agentAvatarLabel(message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName)
+                        : "S"}
                     </span>
                   )}
                   <div className="chat-message-body">
@@ -520,10 +479,9 @@ export function ChatPage() {
                     {message.role === "assistant" && (
                       <span className="chat-message-source">智能体回复，不代表任务产物</span>
                     )}
-                    {(message.approvalId || (typeof message.turnVariant === "number" && message.turnVariant > 0)) && (
+                    {typeof message.turnVariant === "number" && message.turnVariant > 0 && (
                       <div className="meta-line">
-                        {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
-                        {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
+                        <Badge>变体 {message.turnVariant}</Badge>
                       </div>
                     )}
                     {!issueCreatedEvent && <p>{message.body}</p>}
@@ -548,7 +506,6 @@ export function ChatPage() {
                       <IssueCreatedCard
                         issueId={issueCreatedEvent.issueId}
                         issueIdentifier={issueCreatedEvent.issueIdentifier}
-                        linkedIssue={linkedIssueById.get(issueCreatedEvent.issueId) ?? null}
                         orgId={orgId}
                       />
                     )}
@@ -570,6 +527,23 @@ export function ChatPage() {
                     )}
                   </div>
                 </article>
+                {approvalPrompt?.sourceMessageId === message.id && (
+                  <article className="chat-message system chat-approval-system-message">
+                    <span aria-hidden="true" className="chat-agent-avatar">S</span>
+                    <div className="chat-message-body">
+                      <strong>系统</strong>
+                      <ChatApprovalPrompt
+                        approvalId={approvalPrompt.approvalId}
+                        decisionNote={approvalPromptDetail.data?.decisionNote ?? null}
+                        hasCreatedIssue={createdIssueSourceMessageIds.has(approvalPrompt.sourceMessageId)}
+                        orgId={orgId}
+                        proposal={approvalPrompt.proposal}
+                        status={approvalPromptStatus ?? approvalPrompt.status}
+                      />
+                    </div>
+                  </article>
+                )}
+                </Fragment>
               );
             })}
             {send.isPending && thinkingChatId === chatId && (
@@ -594,16 +568,6 @@ export function ChatPage() {
               </article>
             )}
           </div>
-          {approvalPrompt && (
-            <ChatApprovalPrompt
-              approvalId={approvalPrompt.approvalId}
-              orgId={orgId}
-              onDecide={(approvalId, action) => decideIssueProposal.mutate({ approvalId, action })}
-              proposal={approvalPrompt.proposal}
-              status={approvalPromptStatus ?? approvalPrompt.status}
-              working={decideIssueProposal.isPending}
-            />
-          )}
           {messages.error && <ErrorNotice error={messages.error} />}
           <form aria-label="发送消息" className="form chat-composer" onSubmit={submit}>
             <label className="chat-message-input">
@@ -623,80 +587,45 @@ export function ChatPage() {
             )}
             {selectedAgentSkills.error && <ErrorNotice error={selectedAgentSkills.error} />}
             {updatePlanMode.error && <ErrorNotice error={updatePlanMode.error} />}
-            <div className="chat-context-controls chat-context-controls-readonly" aria-label="当前对话上下文">
-              <label aria-label="当前项目">
-                <select aria-label="项目" disabled value={projectContext?.entityId ?? ""}>
-                  <option value={projectContext?.entityId ?? ""}>
-                    {projectContext?.entity?.label ?? (projectContext ? projectContext.entityId : "未关联项目")}
-                  </option>
-                </select>
-              </label>
-              <label aria-label="当前智能体" className="chat-agent-readonly-field">
+            <ChatComposerContextBar
+              agentControl={(
                 <select aria-label="对话智能体" disabled value={agentId}>
                   <option value={agentId}>{selectedAgentControlLabel}</option>
                 </select>
-              </label>
-              <label aria-label="当前任务创建模式">
+              )}
+              issueCreationModeControl={(
                 <select aria-label="任务创建模式" disabled value={chat.data?.issueCreationMode ?? "manual_approval"}>
                   <option value={chat.data?.issueCreationMode ?? "manual_approval"}>
                     {chatIssueCreationModeLabel(chat.data?.issueCreationMode)}
                   </option>
                 </select>
-              </label>
-              <label className="chat-plan-mode-toggle">
-                <input
-                  aria-label="计划模式"
-                  checked={Boolean(chat.data?.planMode)}
-                  disabled={updatePlanMode.isPending}
-                  onChange={(event) => updatePlanMode.mutate(event.target.checked)}
-                  type="checkbox"
-                />
-                计划模式
-              </label>
-              <details
-                className="chat-skill-dropdown"
-                onBlur={(event) => {
-                  if (focusLeftElement(event)) setSkillDropdownOpen(false);
-                }}
-                onToggle={(event) => setSkillDropdownOpen(event.currentTarget.open)}
-                open={skillDropdownOpen}
-                ref={skillDropdownRef}
-              >
-                <summary>技能列表</summary>
-                <div className="chat-skill-list">
-                  {desiredSkills.map((skill) => (
-                    <span className="chat-skill-chip active" key={`desired-${skill}`}>{skill}</span>
-                  ))}
-                  {skillEntries.map((entry) => (
-                    <span className="chat-skill-chip" key={skillLabel(entry)}>{skillLabel(entry)}</span>
-                  ))}
-                  {agentId && selectedAgentSkills.isSuccess && desiredSkills.length === 0 && skillEntries.length === 0 && (
-                    <span className="muted">暂无技能</span>
-                  )}
-                  {!agentId && <span className="muted">未选择智能体</span>}
-                </div>
-              </details>
-              <button className="chat-create-submit" disabled={!agentId || selectedChatAgentUnavailable || send.isPending} type="submit">
-                发送
-              </button>
-            </div>
-            <ChatIssueCreationHelp />
+              )}
+              locked
+              planMode={{
+                checked: Boolean(chat.data?.planMode),
+                disabled: updatePlanMode.isPending,
+                onChange: (checked) => updatePlanMode.mutate(checked),
+              }}
+              projectControl={(
+                <select aria-label="项目" disabled value={projectContext?.entityId ?? ""}>
+                  <option value={projectContext?.entityId ?? ""}>
+                    {projectContext?.entity?.label ?? (projectContext ? projectContext.entityId : "未关联项目")}
+                  </option>
+                </select>
+              )}
+              skills={[
+                ...desiredSkills.map((label) => ({ active: true, label })),
+                ...skillEntries.map((entry) => ({ label: skillLabel(entry) })),
+              ]}
+              skillsEmptyText={agentId && selectedAgentSkills.isSuccess ? "暂无技能" : "未选择智能体"}
+              submitDisabled={!agentId || selectedChatAgentUnavailable || send.isPending}
+              submitLabel="发送"
+            />
           </form>
-        </section>
+          </TertiaryPageViewport>
+        </TertiaryPageShell>
       )}
     </ChatsWorkspace>
-  );
-}
-
-function ChatIssueCreationHelp() {
-  return (
-    <details className="chat-context-help">
-      <summary>任务创建规则</summary>
-      <div>
-        <p>计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。</p>
-        <p>任务创建模式由对话设置决定；智能体只提交任务建议，不能在回复里自行切换自动创建。</p>
-      </div>
-    </details>
   );
 }
 
@@ -736,74 +665,103 @@ function IssueProposalCard({
 function IssueCreatedCard({
   issueId,
   issueIdentifier,
-  linkedIssue,
   orgId,
 }: {
   issueId: string;
   issueIdentifier: string | null;
-  linkedIssue: ChatLinkedIssueSummary | null;
   orgId: string;
 }) {
-  const label = linkedIssue?.identifier ?? issueIdentifier ?? issueId.slice(0, 8);
-  const title = linkedIssue?.title ?? "任务已创建";
+  const label = issueIdentifier ?? issueId.slice(0, 8);
   return (
-    <Link className="chat-issue-created-card" to={`/orgs/${orgId}/issues/${issueId}`}>
-      <div>
-        <span>任务创建成功</span>
-        <strong>{label} · {title}</strong>
+    <ChatSystemEventCard
+      actions={<span className="chat-system-event-detail-link">任务详情</span>}
+      eyebrow="任务创建成功"
+      linkLabel={`任务详情：${label}`}
+      status={<Badge>已创建</Badge>}
+      title={`${label} · 任务已创建`}
+      to={`/orgs/${orgId}/issues/${issueId}`}
+    />
+  );
+}
+
+function ChatSystemEventCard({
+  actions,
+  detail,
+  detailLabel,
+  eyebrow,
+  linkLabel,
+  status,
+  title,
+  to,
+}: {
+  actions?: ReactNode;
+  detail?: string;
+  detailLabel?: string;
+  eyebrow: string;
+  linkLabel?: string;
+  status?: ReactNode;
+  title: string;
+  to?: string;
+}) {
+  const content = (
+    <>
+      <span className="chat-system-event-eyebrow">{eyebrow}</span>
+      <div className="chat-system-event-status">{status}</div>
+      <div className="chat-system-event-main">
+        <strong>{title}</strong>
+        {detail && (
+          <span className="chat-system-event-detail">
+            {detailLabel && <span>{detailLabel}</span>}
+            <span title={detail}>{detail}</span>
+          </span>
+        )}
       </div>
-      <Badge>{linkedIssue ? statusLabel(linkedIssue.status) : "查看任务"}</Badge>
-    </Link>
+      <div className="chat-system-event-actions">{actions}</div>
+    </>
+  );
+  return to ? (
+    <Link aria-label={linkLabel} className="chat-system-event-card" to={to}>{content}</Link>
+  ) : (
+    <div className="chat-system-event-card" role="status">{content}</div>
   );
 }
 
 function ChatApprovalPrompt({
   approvalId,
-  onDecide,
+  decisionNote,
+  hasCreatedIssue,
   orgId,
   proposal,
   status,
-  working,
 }: {
   approvalId: string;
-  onDecide: (approvalId: string, action: ChatApprovalPromptAction) => void;
+  decisionNote: string | null;
+  hasCreatedIssue: boolean;
   orgId: string;
   proposal: Record<string, unknown>;
   status: ChatApprovalPromptStatus;
-  working: boolean;
 }) {
   const title = proposalText(proposal.title) || "未命名任务";
-  const description = proposalText(proposal.description);
   const pending = status === "pending";
   const approved = status === "approved";
+  const resolved = !pending;
+  const approvedSyncing = approved && !hasCreatedIssue;
+  const statusBadge = <span className={`chat-approval-status ${status}`}>{chatApprovalStatusLabel(status)}</span>;
+  const actionLabel = pending ? "去审批" : "审批详情";
   return (
-    <div className="chat-approval-prompt" role="status">
-      <div>
-        <span className="chat-approval-prompt-heading">
-          <span>{approved ? "任务创建结果同步中" : "任务创建待确认"}</span>
-          <span className={`chat-approval-status ${status}`}>{chatApprovalStatusLabel(status)}</span>
-        </span>
-        <strong>{title}</strong>
-        {approved ? <p>审批已同意，正在刷新任务创建结果。</p> : description && <p>{description}</p>}
-      </div>
-      {pending && (
-        <div className="chat-approval-actions">
-          <button disabled={working} onClick={() => onDecide(approvalId, "approve")} type="button">
-            {working ? "处理中..." : "同意"}
-          </button>
-          <button className="danger" disabled={working} onClick={() => onDecide(approvalId, "reject")} type="button">
-            拒绝
-          </button>
-          <button className="secondary" disabled={working} onClick={() => onDecide(approvalId, "requestRevision")} type="button">
-            需修改
-          </button>
-        </div>
-      )}
-      {!pending && !approved && (
-        <Link className="button secondary small-button" to={`/orgs/${orgId}/approvals/${approvalId}`}>
-          查看审批
-        </Link>
-      )}
-    </div>
+    <ChatSystemEventCard
+      actions={<span className="chat-system-event-detail-link">{actionLabel}</span>}
+      detail={approvedSyncing
+        ? "审批已同意，正在刷新任务创建结果。"
+        : resolved
+          ? decisionNote?.trim() || "审批人未填写审核意见。"
+          : undefined}
+      detailLabel={resolved && !approvedSyncing ? "审核意见" : undefined}
+      eyebrow={approvedSyncing ? "任务创建结果同步中" : resolved ? "审批结果" : "任务创建待确认"}
+      linkLabel={`${actionLabel}：${title}`}
+      status={statusBadge}
+      title={title}
+      to={`/orgs/${orgId}/approvals/${approvalId}`}
+    />
   );
 }

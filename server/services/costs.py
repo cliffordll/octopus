@@ -64,8 +64,8 @@ class CostService:
                 agent_id = actor_id
             elif agent_id != actor_id:
                 raise PermissionError("Agent actors can only report their own cost")
-        elif actor_type not in {"board", "system"}:
-            raise PermissionError("Board, system, or agent actor required")
+        elif actor_type not in {"user", "system"}:
+            raise PermissionError("Human, system, or Agent actor required")
 
         if agent_id is not None:
             agent = await get_agent_by_id(self._session, agent_id)
