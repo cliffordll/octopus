@@ -12481,10 +12481,7 @@ pre {
 
 .chat-context-help summary {
   align-items: center;
-  background: #0a0f17;
-  border: 1px solid #202a3b;
-  border-radius: 9px;
-  color: #cbd7e8;
+  color: #69aaf7;
   cursor: pointer;
   display: inline-flex;
   font-size: 12px;
@@ -12492,8 +12489,8 @@ pre {
   height: 38px;
   justify-content: center;
   list-style: none;
-  min-width: 64px;
-  padding: 0 12px;
+  padding: 0 6px;
+  text-underline-offset: 3px;
 }
 
 .chat-context-help summary::-webkit-details-marker {
@@ -12501,9 +12498,14 @@ pre {
 }
 
 .chat-context-help summary:hover {
-  background: #111827;
-  border-color: #334155;
-  color: #f0f6ff;
+  color: #a9d0ff;
+  text-decoration: underline;
+}
+
+.chat-context-help summary:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid rgba(105, 170, 247, .55);
+  outline-offset: 2px;
 }
 
 .chat-context-help div {
@@ -12638,6 +12640,17 @@ pre {
   display: flex;
   gap: 10px;
   padding-left: 2px;
+}
+
+.chat-message.system {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  padding-left: 2px;
+}
+
+.chat-message.system .chat-message-body {
+  flex: 1 1 auto;
 }
 
 .chat-message.user {
@@ -12816,16 +12829,15 @@ pre {
 }
 
 .chat-approval-system-message {
-  padding-left: 2px;
   width: 82%;
 }
 
-.chat-approval-system-message > strong {
+.chat-approval-system-message .chat-message-body > strong {
   display: block;
   font-size: 12px;
 }
 
-.chat-approval-system-message > .chat-system-event-card {
+.chat-approval-system-message .chat-system-event-card {
   width: 100%;
 }
 
@@ -12861,13 +12873,6 @@ pre {
 .chat-approval-status.cancelled {
   background: #33151a;
   color: #fca5a5;
-}
-
-.chat-approval-actions {
-  align-items: center;
-  display: flex !important;
-  flex: 0 0 auto;
-  gap: 8px !important;
 }
 
 .chat-system-event-card button,
